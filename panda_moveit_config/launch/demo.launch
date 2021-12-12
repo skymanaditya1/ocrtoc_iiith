@@ -18,7 +18,7 @@
   This corresponds to moving around the real robot without the use of MoveIt.
   -->
   <arg name="rviz_tutorial" default="false" />
-  <arg name="use_gui" default="false" />
+  <arg name="use_gui" default="true" />
 
   <!-- Load the URDF, SRDF and other .yaml configuration files on the param server -->
   <include file="$(find panda_moveit_config)/launch/planning_context.launch">

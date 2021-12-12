@@ -1060,6 +1060,8 @@ class Camera:
     def calIntrinsicMatrix(self):
         f = math.sqrt(self.width * self.width / 4.0 + self.height * self.height / 4.0) / 2.0 / math.tan(self.fov / 2.0 / 180.0 * math.pi)
         return (f, 0.0, self.width / 2.0 - 0.5, 0.0, f, self.height / 2.0 - 0.5, 0.0, 0.0, 1.0)
+    
+        
 
     def getCameraImage(self, position, quaternion):
         self.viewMatrix = self.calViewMatrix(position=position, quaternion=quaternion)

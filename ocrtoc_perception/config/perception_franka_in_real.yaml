@@ -20,7 +20,7 @@ reconstruction:
     z_min: -0.05
     x_max: 0.3
     y_max: 0.6
-    z_max: 0.4
+    z_max: 0.45
     nb_neighbors: 50
     std_ratio: 2.0
     voxel_size: 0.0015
@@ -87,3 +87,6 @@ response:
     mask_thresh: 0.5
 
 debug: False
+debug_pointcloud: True
+debug_grasps: True
+
