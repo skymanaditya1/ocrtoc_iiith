@@ -197,6 +197,16 @@ class Perceptor():
         color_images = []
         camera_poses = []
         # capture images by realsense. The camera will be moved to different locations.
+        
+        # capture image by kinect
+        if self.use_camera in ['kinect', 'both']:
+            points_trans_matrix = self.get_kinect_points_transform_matrix()
+            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
+            full_pcd_kinect.transform(points_trans_matrix)
+            full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
+            if self.use_camera == 'both':
+                pcds.append(full_pcd_kinect)
+        
         if self.use_camera in ['realsense', 'both']:
             if self.use_camera == 'realsense':
                 arm_poses = self.fixed_arm_poses
@@ -226,14 +236,7 @@ class Perceptor():
                     o3d.visualization.draw_geometries([pcd, frame])
                 pcds.append(pcd)
 
-        # capture image by kinect
-        if self.use_camera in ['kinect', 'both']:
-            points_trans_matrix = self.get_kinect_points_transform_matrix()
-            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
-            full_pcd_kinect.transform(points_trans_matrix)
-            full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
-            if self.use_camera == 'both':
-                pcds.append(full_pcd_kinect)
+        
         # if more than one images are used, the scene will be reconstructed by regitration.
         if self.use_camera in ['realsense', 'both']:
             trans, full_pcd_realsense = process_pcds(pcds, use_camera = self.use_camera, reconstruction_config = self.config['reconstruction'])
@@ -291,6 +294,7 @@ class Perceptor():
             total_pcd = o3dp.merge_pcds([*geolist])
             o3d.visualization.draw_geometries([*geolist, frame])
             rospy.loginfo(object_poses)
+        rospy.loginfo(object_poses)
         return object_poses
 
     def compute_grasp_pose(self, full_pcd):
@@ -504,6 +508,8 @@ class Perceptor():
             response_poses[object_name] = dict()
             qw, qx, qy, qz = mat2quat(object_poses[object_name]['pose'][:3,:3])
             response_poses[object_name]['object_pose'] = {
+                
+                                
                 'x': object_poses[object_name]['pose'][0, 3],
                 'y': object_poses[object_name]['pose'][1, 3],
                 'z': object_poses[object_name]['pose'][2, 3],

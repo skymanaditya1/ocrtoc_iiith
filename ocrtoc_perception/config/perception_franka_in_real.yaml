@@ -9,16 +9,16 @@ kinect_depth_topic_name: /kinect/depth_to_color/image_raw
 kinect_points_topic_name: /kinect/depth/points
 transform_from_frame: world
 graspnet_checkpoint_path: src/ocrtoc_perception/graspnet/logs/log_rs/checkpoint.tar
-both_camera_fix_pose_file: config/arm_poses_Franka_realsense.csv
-realsense_camera_fix_pose_file: config/arm_poses_Franka_realsense.csv
+both_camera_fix_pose_file: config/arm_poses_Franka_realsense_original.csv
+realsense_camera_fix_pose_file: config/arm_poses_Franka_realsense_original.csv
 # Select a pose estimation method [icp|superglue]
 pose_method: superglue
 
 reconstruction:
-    x_min: -0.30
+    x_min: -0.4
     y_min: -0.6
     z_min: -0.05
-    x_max: 0.3
+    x_max: 0.4
     y_max: 0.6
     z_max: 0.45
     nb_neighbors: 50
@@ -30,7 +30,7 @@ reconstruction:
     rotation_thresh: 0.02
     max_correspondence_distance: 0.02
     both_camera_order: [2,1,0,3,4,5]
-    realsense_camera_order: [2,1,0,3,4,5]
+    realsense_camera_order:  [2,1,0,3,4,5]    #[2,1,0,3,4,5,6]
 
 6d_pose_by_geometry:
     models_package: ocrtoc_materials
@@ -82,11 +82,11 @@ graspnet:
     refine_approach_dist: 0.01
 
 response:
-    dist_thresh: 0.05
+    dist_thresh: 0.2
     angle_thresh: 20
     mask_thresh: 0.5
 
 debug: False
 debug_pointcloud: True
-debug_grasps: True
+debug_grasps: False
 

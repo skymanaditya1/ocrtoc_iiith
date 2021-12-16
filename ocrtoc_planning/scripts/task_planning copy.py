@@ -16,8 +16,6 @@ from ocrtoc_msg.srv import PerceptionTarget, PerceptionTargetRequest
 import rospkg
 import rospy
 
-import time
-
 sys.path.append(os.path.join(os.path.dirname(__file__), 'pddlstream'))
 from pddlstream.algorithms.focused import solve_focused
 from pddlstream.algorithms.incremental import solve_incremental
@@ -91,7 +89,6 @@ class TaskPlanner(object):
         self._n_available_grasp_pose = 1
         self._last_gripper_action = 'place'
         self._target_pick_object = None
-        self._last_action = "pick"
         print("number of blocks: {}".format(self._n_blocks))
         print("blocks: {}".format(self._blocks))
         print("goal cartesian poses dictionary: {}".format(self._goal_cartesian_pose_dic))
@@ -564,9 +561,6 @@ class TaskPlanner(object):
                 grasp_pose = self._pose_mapping[str_pose][self._available_grasp_pose_index[self._target_pick_object]]
                 # plan_result = self._motion_planner.move_cartesian_space(grasp_pose)  # move in cartesian straight path
                 # plan_result = self._motion_planner.move_cartesian_space_discrete(grasp_pose)  # move in cartesian discrete path
-                print("in pcik")
-                print(" grasp pose is")
-                print(grasp_pose)
                 plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose)  # move in cartesian discrete upright path
                 if plan_result:
                     print('Move to the target position of object {} successfully, going to place it'.format(self._target_pick_object))
@@ -578,13 +572,7 @@ class TaskPlanner(object):
                 for index in range(self._start_grasp_index if self._start_grasp_index >= 0 else 0, self._end_grasp_index if self._end_grasp_index <= len(self._pose_mapping[str_pose]) else len(self._pose_mapping[str_pose])):
                     # plan_result = self._motion_planner.move_cartesian_space(self._pose_mapping[str_pose][index], self._pick_via_up)
                     # plan_result = self._motion_planner.move_cartesian_space_discrete(self._pose_mapping[str_pose][index], self._pick_via_up)
-                   
-                    # Before picking, we need to remove the collision point cloud here
-                    
-                    
                     plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up)
-                    print("in place")
-                    print(self._pose_mapping[str_pose][index])
                     if plan_result:
                         self._available_grasp_pose_index[self._target_pick_object] = index
                         rospy.loginfo('available grasp pose index: ' + str(index))
@@ -627,8 +615,6 @@ class TaskPlanner(object):
         elif name == 'pick':
             rospy.loginfo('pick')
             holding, _, _ = args
-            # while True:
-            #     time.sleep(5)
             del block_poses[holding]
             self._motion_planner.pick()
             self._last_gripper_action = name
