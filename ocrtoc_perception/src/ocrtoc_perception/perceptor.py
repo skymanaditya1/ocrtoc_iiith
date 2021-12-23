@@ -446,6 +446,8 @@ class Perceptor():
         if self.debug_pointcloud:
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list()])
+            
+        print(f'Object List: {object_list}')
 
         # Computer Object 6d Poses
         object_poses = self.compute_6d_pose(

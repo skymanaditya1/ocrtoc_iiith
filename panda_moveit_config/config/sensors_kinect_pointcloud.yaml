@@ -1,11 +1,11 @@
 sensors:
   - sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
-    point_cloud_topic: /voxel_grid2/output
+    point_cloud_topic: /pointcloud/cropbox
     max_range: 2.5
     point_subsample: 1
     padding_offset: 0.05
     padding_scale: 1.0
-    max_update_rate: 30.0
+    max_update_rate: 5.0
     filtered_cloud_topic: filtered_cloud
 
 

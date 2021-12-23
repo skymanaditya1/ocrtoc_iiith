@@ -3,5 +3,6 @@
   <node name="perception_entrance" pkg="ocrtoc_perception" type="perception_entrance.py" output="screen">
     <param name="config" value="$(arg config)"/>
     <param name="service_name" value="perception_action_target"/>
+    <!-- <param name="service_name" value="fake_perception_action_target"/> -->
   </node>
 </launch>
