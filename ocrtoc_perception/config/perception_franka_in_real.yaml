@@ -1,4 +1,4 @@
-use_camera: realsense
+use_camera: both
 arm_topic: arm_controller/command
 color_info_topic_name: /realsense/color/camera_info
 color_topic_name: /realsense/color/image_raw
@@ -29,7 +29,7 @@ reconstruction:
     translation_thresh: 3.95
     rotation_thresh: 0.02
     max_correspondence_distance: 0.02
-    both_camera_order: [2,1,0,3,4,5]
+    both_camera_order: [2,1,0,3,4,5,6]
     realsense_camera_order: [2,1,0,3,4,5]
 
 6d_pose_by_geometry:
@@ -87,3 +87,4 @@ response:
     mask_thresh: 0.5
 
 debug: False
+debug_pointcloud: True

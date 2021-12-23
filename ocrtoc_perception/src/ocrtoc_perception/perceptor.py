@@ -95,6 +95,7 @@ class Perceptor():
     ):
         self.config = config
         self.debug = self.config['debug']
+        self.debug_pointcloud = self.config['debug_pointcloud']
         self.graspnet_baseline = GraspNetBaseLine(
             checkpoint_path = os.path.join(
                 rospkg.RosPack().get_path('ocrtoc_perception'),
@@ -226,7 +227,7 @@ class Perceptor():
 
         # capture image by kinect
         if self.use_camera in ['kinect', 'both']:
-            points_trans_matrix = self.kinect_get_points_transform_matrix()
+            points_trans_matrix = self.get_kinect_points_transform_matrix()
             full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
             full_pcd_kinect.transform(points_trans_matrix)
             full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
@@ -437,7 +438,7 @@ class Perceptor():
         full_pcd, color_images, camera_poses = self.capture_data()
         # Compute Grasping Poses (Many Poses in a Scene)
         gg = self.compute_grasp_pose(full_pcd)
-        if self.debug:
+        if self.debug_pointcloud:
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list()])
 
