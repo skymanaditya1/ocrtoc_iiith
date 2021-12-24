@@ -96,6 +96,7 @@ class Perceptor():
         self.config = config
         self.debug = self.config['debug']
         self.debug_pointcloud = self.config['debug_pointcloud']
+        self.debug_kinect = self.config['debug_kinect']
         self.debug_grasps = self.config['debug_grasps']
         self.graspnet_baseline = GraspNetBaseLine(
             checkpoint_path = os.path.join(
@@ -146,6 +147,9 @@ class Perceptor():
 
     def get_color_image(self):
         return self.camera_interface.get_numpy_image_with_encoding(self.color_topic_name)[0]
+    
+    def get_kinect_image(self):
+        return self.camera_interface.get_numpy_image_with_encoding(self.kinect_color_topic_name)[0]
 
     def get_color_camK(self):
         d = self.camera_interface.get_dict_camera_info(self.color_info_topic_name)
@@ -197,6 +201,29 @@ class Perceptor():
         color_images = []
         camera_poses = []
         # capture images by realsense. The camera will be moved to different locations.
+        
+        # capture image by kinect
+        if self.use_camera in ['kinect', 'both']:
+            points_trans_matrix = self.get_kinect_points_transform_matrix()
+            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
+            full_pcd_kinect.transform(points_trans_matrix)
+            full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
+            if self.use_camera == 'both':
+                pcds.append(full_pcd_kinect)
+                
+                time.sleep(1.0)
+                kinect_image = self.get_kinect_image()
+                kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGBA2RGB)
+                if self.debug_kinect:
+                    cv2.imshow('color', cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR))
+                    cv2.waitKey(0)
+                    cv2.destroyAllWindows()
+                color_images.append(kinect_image)
+
+                if self.debug:
+                    print('points_trans_matrix:', points_trans_matrix)
+                camera_poses.append(self.get_kinect_color_transform_matrix())
+        
         if self.use_camera in ['realsense', 'both']:
             if self.use_camera == 'realsense':
                 arm_poses = self.fixed_arm_poses
@@ -226,14 +253,7 @@ class Perceptor():
                     o3d.visualization.draw_geometries([pcd, frame])
                 pcds.append(pcd)
 
-        # capture image by kinect
-        if self.use_camera in ['kinect', 'both']:
-            points_trans_matrix = self.get_kinect_points_transform_matrix()
-            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
-            full_pcd_kinect.transform(points_trans_matrix)
-            full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
-            if self.use_camera == 'both':
-                pcds.append(full_pcd_kinect)
+        
         # if more than one images are used, the scene will be reconstructed by regitration.
         if self.use_camera in ['realsense', 'both']:
             trans, full_pcd_realsense = process_pcds(pcds, use_camera = self.use_camera, reconstruction_config = self.config['reconstruction'])

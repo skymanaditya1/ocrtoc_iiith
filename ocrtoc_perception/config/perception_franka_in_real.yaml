@@ -1,4 +1,4 @@
-use_camera: realsense
+use_camera: both
 arm_topic: arm_controller/command
 color_info_topic_name: /realsense/color/camera_info
 color_topic_name: /realsense/color/image_raw
@@ -9,7 +9,7 @@ kinect_depth_topic_name: /kinect/depth_to_color/image_raw
 kinect_points_topic_name: /kinect/depth/points
 transform_from_frame: world
 graspnet_checkpoint_path: src/ocrtoc_perception/graspnet/logs/log_rs/checkpoint.tar
-both_camera_fix_pose_file: config/arm_poses_Franka_realsense.csv
+both_camera_fix_pose_file: config/arm_poses_Franka_realsensev0.csv
 realsense_camera_fix_pose_file: config/arm_poses_Franka_realsense.csv
 # Select a pose estimation method [icp|superglue]
 pose_method: superglue
@@ -29,7 +29,7 @@ reconstruction:
     translation_thresh: 3.95
     rotation_thresh: 0.02
     max_correspondence_distance: 0.02
-    both_camera_order: [2,1,0,3,4,5]
+    both_camera_order: [2,1,0]
     realsense_camera_order: [2,1,0,3,4,5]
 
 6d_pose_by_geometry:
@@ -88,5 +88,5 @@ response:
 
 debug: False
 debug_pointcloud: True
-debug_grasps: True
-
+debug_grasps: False
+debug_kinect: True
