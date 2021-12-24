@@ -166,6 +166,8 @@ def render_models(model_renderer, images_path, models_path, models, over_write, 
                            os.path.join(images_path, 'views.yaml'))
 
     for model_id, model in enumerate(models):
+        # model if of type modelname_v0
+        model = model.rsplit('_', 1)[0]
         print('rendering ' + model)
 
         model_path = os.path.join(models_path, model, 'visual.ply')

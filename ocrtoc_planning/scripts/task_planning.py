@@ -97,7 +97,7 @@ class TaskPlanner(object):
     def simplify_task(self, goal_cartesian_poses):
         self._goal_cartesian_poses = []
         for i in goal_cartesian_poses:
-            self._goal_cartesian_poses.append(i.poses[0])
+            self._goal_cartesian_poses.append(i.poses)
 
     def get_pose_perception(self, target_object_list):
         """Get current poses of target objects from perception node.
@@ -312,7 +312,13 @@ class TaskPlanner(object):
     def goal_pose_transformation(self):
         blocks_x = self._n_blocks
         # construct 2d pose for target object cartesian pose
-        sorted_goal_cartesian_pose_list = sorted(self._goal_cartesian_pose_dic.items(), key=lambda obj: obj[1].position.z)
+        sorted_goal_cartesian_pose_list_temp = sorted(self._goal_cartesian_pose_dic.items(), key=lambda obj: obj[1][0].position.z)
+        sorted_goal_cartesian_pose_list = []
+        for object_type in sorted_goal_cartesian_pose_list_temp:
+            for i, pose_of_object in enumerate(object_type[1]):
+                sorted_goal_cartesian_pose_list.append(('{}_v{}'.format(object_type[0], i), pose_of_object))
+
+        print('sorted goal cartesian pose list: {}'.format(sorted_goal_cartesian_pose_list))
         for i in range(len(sorted_goal_cartesian_pose_list)):
             if i == 0:
                 self._goal_block_pose_dic[sorted_goal_cartesian_pose_list[0][0]] = np.array([blocks_x, 0])

@@ -196,6 +196,14 @@ class Perceptor():
         color_images = []
         camera_poses = []
         # capture images by realsense. The camera will be moved to different locations.
+        if self.use_camera in ['kinect', 'both']:
+            points_trans_matrix = self.get_kinect_points_transform_matrix()
+            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
+            full_pcd_kinect.transform(points_trans_matrix)
+            full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
+            if self.use_camera == 'both':
+                pcds.append(full_pcd_kinect)
+        
         if self.use_camera in ['realsense', 'both']:
             if self.use_camera == 'realsense':
                 arm_poses = self.fixed_arm_poses
@@ -226,13 +234,7 @@ class Perceptor():
                 pcds.append(pcd)
 
         # capture image by kinect
-        if self.use_camera in ['kinect', 'both']:
-            points_trans_matrix = self.get_kinect_points_transform_matrix()
-            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
-            full_pcd_kinect.transform(points_trans_matrix)
-            full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
-            if self.use_camera == 'both':
-                pcds.append(full_pcd_kinect)
+        
         # if more than one images are used, the scene will be reconstructed by regitration.
         if self.use_camera in ['realsense', 'both']:
             trans, full_pcd_realsense = process_pcds(pcds, use_camera = self.use_camera, reconstruction_config = self.config['reconstruction'])
@@ -248,6 +250,8 @@ class Perceptor():
         if self.debug:
             t2 = time.time()
             rospy.loginfo('Capturing data time:{}'.format(t2 - t1))
+        
+
         return full_pcd, color_images, camera_poses
 
     def compute_6d_pose(self, full_pcd, color_images, camera_poses, pose_method, object_list):
@@ -437,6 +441,8 @@ class Perceptor():
         # Capture Data
         full_pcd, color_images, camera_poses = self.capture_data()
         # Compute Grasping Poses (Many Poses in a Scene)
+
+        o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
         gg = self.compute_grasp_pose(full_pcd)
         if self.debug_pointcloud:
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)

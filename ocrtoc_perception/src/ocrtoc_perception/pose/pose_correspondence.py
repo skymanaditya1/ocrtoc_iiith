@@ -5,6 +5,7 @@ import cv2
 import json
 import numpy as np
 import PIL
+import copy
 import io
 import base64
 import pickle as pkl
@@ -67,30 +68,37 @@ def check_match_quality(raw_mesh, view, kp1, kp2, matches, camera_matrix, min_co
     return False, False, False
 
 def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, camera_matrix, rendered_object_dir, models_dir, config, rot=0):
+    print('List of all the objects: {}'.format(obj_list))
+    original_image = copy.deepcopy(image)
     resize = config['resize']
-    image, inp, scale = convert_image(image, config['device'], resize, rot, False)
-
-    kps1_dict = matching.extract_feat(inp)
-    kp1 = kps1_dict['keypoints'][0].cpu().numpy()
-    if rot == 2:
-        kp1[:, 0] = image.shape[1]-1-kp1[:, 0]
-        kp1[:, 1] = image.shape[0]-1-kp1[:, 1]
-    kp1 *= scale
-
+    
     ret = {}
 
     for obj in tqdm(obj_list, 'Calculating object poses for one image'):
+        image, inp, scale = convert_image(original_image, config['device'], resize, rot, False)
+
+        cv2.imshow('test', original_image)
+        cv2.waitKey(0)
+
+        object_name = obj.rsplit('_', 1)[0]
+        kps1_dict = matching.extract_feat(inp)
+        kp1 = kps1_dict['keypoints'][0].cpu().numpy()
+        if rot == 2:
+            kp1[:, 0] = image.shape[1]-1-kp1[:, 0]
+            kp1[:, 1] = image.shape[0]-1-kp1[:, 1]
+        kp1 *= scale
+    
         max_matches = 0
-        max_pose_matrix = None
+        max_pose_matrix, max_pose_matrix_camera = None, None
         raw_mesh_path = os.path.join(
-            models_dir, obj, 'visual.ply')
+            models_dir, object_name, 'visual.ply')
 
         raw_mesh = trimesh.load(raw_mesh_path)
 
         for template_id in range(0, len(renderer.views), 2):
             template_name = io_interface.get_view_name(template_id)
 
-            base_dir = os.path.join(rendered_object_dir, obj+model_suffix)
+            base_dir = os.path.join(rendered_object_dir, object_name+model_suffix)
             t_image, t_inp, t_scale = read_image(os.path.join(
                 base_dir, "{}.png".format(template_name)), 'cuda', resize, 0, False)
 
@@ -111,11 +119,33 @@ def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, 
 
                 if inliers_kps1 is not False and len(inliers_kps1) > max_matches:
                     max_matches = len(inliers_kps1)
+                    max_pose_matrix_camera = pose_matrix
                     pose_matrix = camera_Twc@pose_matrix
 
                     max_pose_matrix = pose_matrix
 
         ret[obj] = (max_matches, max_pose_matrix)
+        
+        # pixel [u, v, w] = camera_matrix (3 x 3) * transformation (camera_pose) (4 x 4) * word_coordinates (pose of the object in world frame) 4 x 4
+        # pixel position = [u/w, v/w, 1]
+        
+        def get_pixel_position(camera_matrix, transformation, pose, image):
+            transformation = transformation[:-1, :] # 3 x 4
+            pose = pose[:-1, -1] # 3 x 1
+            
+            pixel = camera_matrix @ pose # 3,
+            pixel = (pixel/pixel[-1]) # we will get x, y from this.
+            
+            x, y = int(pixel[0]), int(pixel[1])
+            
+            print(f'object: {obj}, shape of image: {image.shape}, pixel predicted: {x}, {y}')
+            
+            image = cv2.circle(image, (x,y), radius=50, color=(0, 0, 255), thickness=-1)
+            
+            return image
+         
+        if max_pose_matrix is not None:
+            original_image = get_pixel_position(camera_matrix, camera_Twc, max_pose_matrix_camera, original_image)
 
     return ret
 
