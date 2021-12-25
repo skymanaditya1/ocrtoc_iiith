@@ -374,7 +374,7 @@ class MotionPlanner(object):
     def pick(self):
         self._gripper_client.wait_for_server()
         goal = control_msgs.msg.GripperCommandGoal()
-        goal.command.position = 0.0
+        goal.command.position = -0.1
         goal.command.max_effort = 30
 
         self._gripper_client.send_goal(goal)

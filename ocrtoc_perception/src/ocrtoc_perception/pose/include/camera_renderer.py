@@ -74,6 +74,8 @@ class ModelRenderer:
         fuze_trimesh = trimesh.load(model_path)
         mesh = pyrender.Mesh.from_trimesh(fuze_trimesh)
 
+        print('number of views: {}'.format(self.num_views))
+
         for view_id in range(self.num_views):
             camera_pose = np.eye(4, dtype=np.float32)
             # cv to gl

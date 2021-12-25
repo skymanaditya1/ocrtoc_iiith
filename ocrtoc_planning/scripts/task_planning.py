@@ -83,7 +83,15 @@ class TaskPlanner(object):
         self._target_block_pose_dic = {}
         self._pose_mapping = {}
         self._target_grasp_pose_dic = {}
-        self._goal_cartesian_pose_dic = dict(zip(self._blocks, self._goal_cartesian_poses))
+        # Handling duplicate objects over here.
+        _goal_cartesian_pose_dic_temp = dict(zip(self._blocks, self._goal_cartesian_poses))
+
+        self._goal_cartesian_pose_dic = {}
+        for object_type in _goal_cartesian_pose_dic_temp:
+            for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
+                self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
+        self._blocks = list(self._goal_cartesian_pose_dic.keys())
+
         self._available_grasp_pose_index = {}
         self._available_block_pose_inverse = {}
         self._n_available_grasp_pose = 1
@@ -312,12 +320,8 @@ class TaskPlanner(object):
     def goal_pose_transformation(self):
         blocks_x = self._n_blocks
         # construct 2d pose for target object cartesian pose
-        sorted_goal_cartesian_pose_list_temp = sorted(self._goal_cartesian_pose_dic.items(), key=lambda obj: obj[1][0].position.z)
-        sorted_goal_cartesian_pose_list = []
-        for object_type in sorted_goal_cartesian_pose_list_temp:
-            for i, pose_of_object in enumerate(object_type[1]):
-                sorted_goal_cartesian_pose_list.append(('{}_v{}'.format(object_type[0], i), pose_of_object))
-
+        sorted_goal_cartesian_pose_list = sorted(self._goal_cartesian_pose_dic.items(), key=lambda obj: obj[1].position.z)
+        
         print('sorted goal cartesian pose list: {}'.format(sorted_goal_cartesian_pose_list))
         for i in range(len(sorted_goal_cartesian_pose_list)):
             if i == 0:
@@ -394,6 +398,7 @@ class TaskPlanner(object):
             self._target_cartesian_pose_dic.clear()
             self._target_block_pose_dic.clear()
             for block in self._blocks:
+                print('Available Cartesian Pose Dic: {} and checking for block {}'.format(self._available_cartesian_pose_dic.keys(), block))
                 if block in self._available_cartesian_pose_dic.keys():
                     self._target_cartesian_pose_dic[block] = self._goal_cartesian_pose_dic[block]
                     self._target_block_pose_dic[block] = self._goal_block_pose_dic[block]

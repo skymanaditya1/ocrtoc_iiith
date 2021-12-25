@@ -256,6 +256,8 @@ class Perceptor():
 
     def compute_6d_pose(self, full_pcd, color_images, camera_poses, pose_method, object_list):
         camK = self.get_color_camK()
+
+        print('Camera Matrix:\n{}'.format(camK))
         if pose_method == 'icp':
             if self.debug:
                 print('Using ICP to obtain 6d poses')
@@ -347,7 +349,6 @@ class Perceptor():
         # min_object_ids: np.array of the id of the nearest object.
         min_object_ids = -1 * np.ones(shape = (len(rs)), dtype = np.int32)
 
-
         # first round to find the object that each grasp belongs to.
 
         # Pay attention that even the grasp pose may be accurate,
@@ -359,7 +360,9 @@ class Perceptor():
             object_pose = object_poses[object_name]
 
             dists = np.linalg.norm(ts - object_pose['pose'][:3,3], axis=1)
+            print('distances {}'.format(dists))
             object_mask = np.logical_and(dists < min_dists, dists < dist_thresh)
+            print('object mask {}'.format(object_mask))
 
             min_object_ids[object_mask] = i
             min_dists[object_mask] = dists[object_mask]

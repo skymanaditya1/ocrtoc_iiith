@@ -68,7 +68,7 @@ def check_match_quality(raw_mesh, view, kp1, kp2, matches, camera_matrix, min_co
     return False, False, False
 
 def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, camera_matrix, rendered_object_dir, models_dir, config, rot=0):
-    print('List of all the objects: {}'.format(obj_list))
+    # print('List of all the objects: {}'.format(obj_list))
     original_image = copy.deepcopy(image)
     resize = config['resize']
     
@@ -77,16 +77,17 @@ def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, 
     for obj in tqdm(obj_list, 'Calculating object poses for one image'):
         image, inp, scale = convert_image(original_image, config['device'], resize, rot, False)
 
-        cv2.imshow('test', original_image)
-        cv2.waitKey(0)
+        # cv2.imshow('test', original_image)
+        # cv2.waitKey(0)
 
-        object_name = obj.rsplit('_', 1)[0]
         kps1_dict = matching.extract_feat(inp)
         kp1 = kps1_dict['keypoints'][0].cpu().numpy()
         if rot == 2:
             kp1[:, 0] = image.shape[1]-1-kp1[:, 0]
             kp1[:, 1] = image.shape[0]-1-kp1[:, 1]
         kp1 *= scale
+
+        object_name = obj.rsplit('_', 1)[0]
     
         max_matches = 0
         max_pose_matrix, max_pose_matrix_camera = None, None
@@ -99,12 +100,26 @@ def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, 
             template_name = io_interface.get_view_name(template_id)
 
             base_dir = os.path.join(rendered_object_dir, object_name+model_suffix)
-            t_image, t_inp, t_scale = read_image(os.path.join(
-                base_dir, "{}.png".format(template_name)), 'cuda', resize, 0, False)
 
-            kps2_dict = matching.extract_feat(t_inp)
+            cache_feature_path = os.path.join(
+                base_dir, "{}_features.pickle".format(template_name))
+
+            t_image, t_inp, t_scale = read_image(os.path.join(
+                    base_dir, "{}.png".format(template_name)), 'cuda', resize, 0, False)
+
+            if os.path.exists(cache_feature_path):
+                kps2_dict = io_interface.load_pickle(cache_feature_path)
+            else:
+                kps2_dict = matching.extract_feat(t_inp)
+
+                io_interface.dump_pickle(kps2_dict, cache_feature_path)
+
+            import time
+
+            t1 = time.time()
 
             kp2 = kps2_dict['keypoints'][0].cpu().numpy()
+            
             kp2 *= t_scale
             pred = {k+'0': v for k, v in kps1_dict.items()}
             pred['image0'] = inp
@@ -124,6 +139,10 @@ def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, 
 
                     max_pose_matrix = pose_matrix
 
+            t2 = time.time()
+
+            # print('time elapsed in matching: {}'.format(t2-t1))
+
         ret[obj] = (max_matches, max_pose_matrix)
         
         # pixel [u, v, w] = camera_matrix (3 x 3) * transformation (camera_pose) (4 x 4) * word_coordinates (pose of the object in world frame) 4 x 4
@@ -138,9 +157,9 @@ def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, 
             
             x, y = int(pixel[0]), int(pixel[1])
             
-            print(f'object: {obj}, shape of image: {image.shape}, pixel predicted: {x}, {y}')
+            # print(f'object: {obj}, shape of image: {image.shape}, pixel predicted: {x}, {y}')
             
-            image = cv2.circle(image, (x,y), radius=50, color=(0, 0, 255), thickness=-1)
+            image = cv2.circle(image, (x,y), radius=80, color=(0, 0, 255), thickness=-1)
             
             return image
          
