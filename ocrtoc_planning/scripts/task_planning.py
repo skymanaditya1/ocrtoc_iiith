@@ -16,6 +16,10 @@ from ocrtoc_msg.srv import PerceptionTarget, PerceptionTargetRequest
 import rospkg
 import rospy
 
+from sensor_msgs.msg import JointState
+import time
+
+
 sys.path.append(os.path.join(os.path.dirname(__file__), 'pddlstream'))
 from pddlstream.algorithms.focused import solve_focused
 from pddlstream.algorithms.incremental import solve_incremental
@@ -88,6 +92,8 @@ class TaskPlanner(object):
 
         self._goal_cartesian_pose_dic = {}
         for object_type in _goal_cartesian_pose_dic_temp:
+            if 'clear_box' in object_type:
+                continue
             for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
                 self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
         self._blocks = list(self._goal_cartesian_pose_dic.keys())
@@ -97,6 +103,10 @@ class TaskPlanner(object):
         self._n_available_grasp_pose = 1
         self._last_gripper_action = 'place'
         self._target_pick_object = None
+        
+        self._completed_objects = []
+        self._pick_success = True
+        
         print("number of blocks: {}".format(self._n_blocks))
         print("blocks: {}".format(self._blocks))
         print("goal cartesian poses dictionary: {}".format(self._goal_cartesian_pose_dic))
@@ -377,6 +387,7 @@ class TaskPlanner(object):
         while len(left_object_dic) != 0:
             # get left objects information
             rospy.loginfo('Try to get information of left objects from perception node')
+            self._completed_objects = []
             self.get_pose_perception(left_object_dic.keys())  # get pose from perception
             # self.get_fake_pose_perception(left_object_dic.keys())  # get pose from simulation environment
 
@@ -415,7 +426,9 @@ class TaskPlanner(object):
             self.target_objects_task_planning()
 
             # delete completed task, update left objects list
-            for block in self._target_cartesian_pose_dic.keys():
+            # for block in self._target_cartesian_pose_dic.keys():
+            #     del left_object_dic[block]
+            for block in self._completed_objects:
                 del left_object_dic[block]
 
             print('left objects: {}'.format(left_object_dic))
@@ -572,6 +585,13 @@ class TaskPlanner(object):
                 grasp_pose = self._pose_mapping[str_pose][self._available_grasp_pose_index[self._target_pick_object]]
                 # plan_result = self._motion_planner.move_cartesian_space(grasp_pose)  # move in cartesian straight path
                 # plan_result = self._motion_planner.move_cartesian_space_discrete(grasp_pose)  # move in cartesian discrete path
+                
+                print("in place")
+                print('$'*80) 
+                print(" grasp pose is")
+                print(grasp_pose)
+                grasp_pose.position.z = grasp_pose.position.z + 0.050
+                
                 plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose)  # move in cartesian discrete upright path
                 if plan_result:
                     print('Move to the target position of object {} successfully, going to place it'.format(self._target_pick_object))
@@ -611,18 +631,34 @@ class TaskPlanner(object):
         conf, holding, block_poses = state
         name, args = action
         if name == 'move':
-            rospy.loginfo('moving')
-            _, conf = args
-            x, y = conf
-            pose = np.array([x, y])
-            print('target block pose: {}'.format(str(pose)))
-            print('available block pose inverse: {}'.format(self._available_block_pose_inverse))
-            if str(pose) in self._available_block_pose_inverse.keys():
-                self._target_pick_object = self._available_block_pose_inverse[str(pose)]
-                rospy.loginfo('Going to pick the object called: ' + str(self._target_pick_object))
+            self._pick_success = True
+            
+            if self._last_gripper_action == 'pick':
+                result = self.gripper_width_test()
+                if result == True:
+                    print('{} is in hand now'.format(self._target_pick_object))
+                    self._pick_success = True
             else:
-                rospy.loginfo('Going to place the object called: ' + str(self._target_pick_object))
-            self.mapping_move(str(pose))
+                result = True
+            
+            if result == True:
+                rospy.loginfo('moving')
+                _, conf = args
+                x, y = conf
+                pose = np.array([x, y])
+                print('target block pose: {}'.format(str(pose)))
+                print('available block pose inverse: {}'.format(self._available_block_pose_inverse))
+                if str(pose) in self._available_block_pose_inverse.keys():
+                    self._target_pick_object = self._available_block_pose_inverse[str(pose)]
+                    rospy.loginfo('Going to pick the object called: ' + str(self._target_pick_object))
+                else:
+                    rospy.loginfo('Going to place the object called: ' + str(self._target_pick_object))
+                self.mapping_move(str(pose))
+                
+            else:
+                rospy.loginfo('couldnt grasp the object')  
+                self._pick_success = False
+                
         elif name == 'pick':
             rospy.loginfo('pick')
             holding, _, _ = args
@@ -638,6 +674,13 @@ class TaskPlanner(object):
             print('nothing in hand')
             self._motion_planner.place()
             self._last_gripper_action = name
+            
+            if self._pick_success == True:
+                self._completed_objects.append(block)
+            # print("block", block)   
+            # print("completed objects", self._completed_objects)
+            # print("left over objs", )
+            
         elif name == 'push':
             block, _, _, pose, conf = args
             holding = None
@@ -645,6 +688,19 @@ class TaskPlanner(object):
             raise ValueError(name)
         return DiscreteTAMPState(conf, holding, block_poses)
 
+    
+    def gripper_width_test(self):
+        #check if the gripper distance is zero
+        print("joint state")
+        joint_state = rospy.wait_for_message("/joint_states", JointState)
+        gripper_dist = [joint_state.position[0], joint_state.position[1]]
+        print("gripper distance is", gripper_dist)
+        if gripper_dist[0] > 0.005 and gripper_dist[1] > 0.005:
+            result = True #successully grabbed the object
+        else:
+            result = False #failed to grab the object
+        return result
+    
     def apply_plan(self, tamp_problem, plan):
         print("enter apply plan function")
         state = tamp_problem.initial
