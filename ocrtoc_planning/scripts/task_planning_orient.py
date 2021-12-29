@@ -648,8 +648,6 @@ class TaskPlanner(object):
             self._pick_success = True
             
             if self._last_gripper_action == 'pick':
-               
-               #if pre pick or post pick is done, give it here.
                 result = self.gripper_width_test()
                 if result == True:
                     print('{} is in hand now'.format(self._target_pick_object))

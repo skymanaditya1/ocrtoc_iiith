@@ -323,6 +323,11 @@ class Perceptor():
         gg.translations = -gg.translations
         gg.rotation_matrices = -gg.rotation_matrices
         gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
+        
+        # if self.debug_pointcloud:
+        #     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+        #     o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list()])
+        
         gg = self.graspnet_baseline.collision_detection(gg, points)
 
         # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
@@ -348,6 +353,10 @@ class Perceptor():
         rs = gg.rotation_matrices
         depths = gg.depths
         scores = gg.scores
+        print(ts)
+        print(rs)
+        print(depths)
+        print(scores)
 
         # move the center to the eelink frame
         ts = ts + rs[:,:,0] * (np.vstack((depths, depths, depths)).T)
@@ -397,8 +406,8 @@ class Perceptor():
             else:
                 mask = add_angle_mask
                 sorting_method = 'score'
-            if self.debug:
-                print(f'{object_name} using sorting method{sorting_method}, mask num:{np.sum(mask)}')
+            # if self.debug:
+            print(f'{object_name} using sorting method{sorting_method}, mask num:{np.sum(mask)}')
             i_scores = scores[mask]
             i_ts = ts[mask]
             i_eelink_rs = eelink_rs[mask]

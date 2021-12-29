@@ -168,11 +168,7 @@ Visualization Manager:
             Alpha: 1
             Show Axes: false
             Show Trail: false
-          table:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
+          
           tool:
             Alpha: 1
             Show Axes: false
@@ -318,11 +314,7 @@ Visualization Manager:
             Alpha: 1
             Show Axes: false
             Show Trail: false
-          table:
-            Alpha: 1
-            Show Axes: false
-            Show Trail: false
-            Value: true
+          
           tool:
             Alpha: 1
             Show Axes: false
@@ -357,7 +349,7 @@ Visualization Manager:
       Name: PointCloud2
       Position Transformer: XYZ
       Queue Size: 10
-      Selectable: true
+      Selectable: false
       Size (Pixels): 3
       Size (m): 0.009999999776482582
       Style: Flat Squares
