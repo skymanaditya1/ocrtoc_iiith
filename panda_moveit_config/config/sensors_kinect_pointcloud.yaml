@@ -1,6 +1,6 @@
 sensors:
   - sensor_plugin: occupancy_map_monitor/PointCloudOctomapUpdater
-    point_cloud_topic: /pointcloud/cropbox
+    point_cloud_topic: /voxel_grid2/output
     max_range: 2.5
     point_subsample: 1
     padding_offset: 0.05
