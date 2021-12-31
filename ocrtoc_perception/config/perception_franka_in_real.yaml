@@ -15,9 +15,9 @@ realsense_camera_fix_pose_file: config/arm_poses_Franka_realsense.csv
 pose_method: superglue
 
 reconstruction:
-    x_min: -0.30
+    x_min: -0.20
     y_min: -0.6
-    z_min: -0.05
+    z_min: -0.0
     x_max: 0.3
     y_max: 0.6
     z_max: 0.4
@@ -82,9 +82,9 @@ graspnet:
     refine_approach_dist: 0.01
 
 response:
-    dist_thresh: 0.1
-    angle_thresh: 20
+    dist_thresh: 0.1 # 0.075
+    angle_thresh: 120
     mask_thresh: 0.5
 
 debug: False
-debug_pointcloud: False
+debug_pointcloud: True

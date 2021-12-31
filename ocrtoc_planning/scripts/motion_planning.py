@@ -5,6 +5,7 @@ import numpy as np
 import os
 import sys
 import yaml
+import tf
 
 import actionlib
 import control_msgs.msg
@@ -66,6 +67,7 @@ class MotionPlanner(object):
                                  config_parameters["home_joint5"] * pi / 180,
                                  config_parameters["home_joint6"] * pi / 180,
                                  config_parameters["home_joint7"] * pi / 180]
+            
 
             self._group_name = config_parameters["group_name"]
 
@@ -101,6 +103,15 @@ class MotionPlanner(object):
         rospy.sleep(1.0)
         print('to home pose result:{}'.format(to_home_result))
         return to_home_result
+    
+    # move to specified home pose
+    def to_rest_pose(self):
+        self._rest_joints = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
+        self._move_group.set_joint_value_target(self._rest_joints)
+        to_rest_result = self._move_group.go()
+        rospy.sleep(1.0)
+        print('to home pose result:{}'.format(to_rest_result))
+        return to_rest_result
 
     # generate path in joint space
     def move_joint_space(self, pose_goal):
@@ -140,14 +151,29 @@ class MotionPlanner(object):
         return from_home_result
 
     # generate cartesian straight path
-    def move_cartesian_space_upright(self, pose_goal, via_up = False):
+    def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action = 'pick'):
         # get a list of way points to target pose, including entrance pose, transformation needed
 
         # transform panda_ee_link goal to panda_link8 goal.
+        if last_gripper_action == 'place':
+            pose_goal.position.z = 0.0
+        
+        quaternion = [pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w]
+        
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
+        
+        print("Roll: {}, Pitch: {}, Yaw: {}".format(roll, pitch, yaw))
+        
+        # quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
+        
+        pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w = quaternion
+        
         group_goal = self.ee_goal_to_link8_goal(pose_goal)
 
         points_to_target = self.get_points_to_target_upright(group_goal)
-        for point in points_to_target:
+        for i, point in enumerate(points_to_target):
+            if i==1 and last_gripper_action=='place':
+                self.to_rest_pose() # self.to_home_pose()
             fraction = 0
             attempts = 0
             waypoints = []
@@ -395,11 +421,20 @@ class MotionPlanner(object):
         points_to_target = []
         current_pose = self._move_group.get_current_pose(self._end_effector).pose
         exit_pose = copy.deepcopy(current_pose)
-        exit_pose.position.z += self._up1
+        exit_pose.position.z = 0.4 # += self._up1
         points_to_target.append(copy.deepcopy(exit_pose))
 
         enter_pose = copy.deepcopy(target_pose)
-        enter_pose.position.z += self._up2
+        
+        quaternion = [target_pose.orientation.x, target_pose.orientation.y, target_pose.orientation.z, target_pose.orientation.w]
+        
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
+        
+        quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
+        
+        target_pose.orientation.x, target_pose.orientation.y, target_pose.orientation.z, target_pose.orientation.w = quaternion
+        
+        enter_pose.position.z = 0.4 # += self._up2
 
         points_to_target.append(copy.deepcopy(enter_pose))
         points_to_target.append(copy.deepcopy(target_pose))

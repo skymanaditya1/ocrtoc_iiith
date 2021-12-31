@@ -30,6 +30,7 @@ from pddlstream.language.generator import outputs_from_boolean
 from pddlstream.utils import user_input, read, INF
 from primitives import GRASP, collision_test, distance_fn, DiscreteTAMPState, get_shift_one_problem, get_shift_all_problem
 from viewer import DiscreteTAMPViewer, COLORS
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 
 class TaskPlanner(object):
@@ -92,8 +93,8 @@ class TaskPlanner(object):
 
         self._goal_cartesian_pose_dic = {}
         for object_type in _goal_cartesian_pose_dic_temp:
-            if 'clear_box' in object_type:
-                continue
+            # if 'clear_box' in object_type:
+            #     continue
             for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
                 self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
         self._blocks = list(self._goal_cartesian_pose_dic.keys())
@@ -111,6 +112,7 @@ class TaskPlanner(object):
         print("blocks: {}".format(self._blocks))
         print("goal cartesian poses dictionary: {}".format(self._goal_cartesian_pose_dic))
         print("task planner constructed")
+        self.left_object_dic = {} # Keeps a global track of objects that are yet to be rearranged
 
     def simplify_task(self, goal_cartesian_poses):
         self._goal_cartesian_poses = []
@@ -148,6 +150,38 @@ class TaskPlanner(object):
 
         for result in perception_result.perception_result_list:
             if result.be_recognized and result.is_graspable:
+                # rrc: Object pose and goal pose comparison happens here (the objects with similar goal and initial poses will be deleted)
+                def get_rotation (quat):
+                    orientation_q = quat.orientation
+                    orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+                    (roll, pitch, yaw) = euler_from_quaternion (orientation_list)
+                    return np.array([roll, pitch, yaw])
+                
+                
+                f_pose = self._goal_cartesian_pose_dic[result.object_name]
+                print("result.object_pose.pose: {}\nf_pose: {}".format(result.object_pose.pose, f_pose))
+                init_cart_coords = np.array([result.object_pose.pose.position.x, result.object_pose.pose.position.y, result.object_pose.pose.position.z])
+                final_cart_coords = np.array([f_pose.position.x, f_pose.position.y, f_pose.position.z])
+                
+                init_quat = get_rotation(result.object_pose.pose)
+                final_quat = get_rotation(f_pose)
+                
+                cart_dist = np.linalg.norm(init_cart_coords - final_cart_coords)
+                quat_dist = np.linalg.norm(init_quat - final_quat) # np.linalg.norm(result.object_pose.pose[4:7] - self._goal_cartesian_pose_dic[result.object_name][4:7])
+                cartesian_dist_thresh = 0.05
+                quaternion_dist_thresh = 0.1
+                
+                if result.object_name !='clear_box_1':
+                    if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
+                        del self.left_object_dic[result.object_name]
+                        continue
+                else:
+                    if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
+                        del self.left_object_dic[result.object_name]
+                        continue
+                
+                # rrc: Object pose and goal pose comparison ends here
+                
                 self._available_cartesian_pose_dic[result.object_name] = result.object_pose.pose
                 self._available_grasp_pose_dic[result.object_name] = []  # pick pose list
 
@@ -384,12 +418,16 @@ class TaskPlanner(object):
 
         # TODO check task result???
         left_object_dic = self._goal_block_pose_dic
+        self.left_object_dic = left_object_dic
         while len(left_object_dic) != 0:
             # get left objects information
             rospy.loginfo('Try to get information of left objects from perception node')
             self._completed_objects = []
             self.get_pose_perception(left_object_dic.keys())  # get pose from perception
             # self.get_fake_pose_perception(left_object_dic.keys())  # get pose from simulation environment
+            
+            if len(left_object_dic) > len(self.left_object_dic):
+                left_object_dic = self.left_object_dic
 
             # if no availabe object information get, call perception node again until the number of repeat call reach max_repeat_call
             if len(self._available_cartesian_pose_dic) == 0:
@@ -588,11 +626,11 @@ class TaskPlanner(object):
                 
                 print("in place")
                 print('$'*80) 
-                print(" grasp pose is")
+                print(" place pose is")
                 print(grasp_pose)
                 grasp_pose.position.z = grasp_pose.position.z + 0.050
                 
-                plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose)  # move in cartesian discrete upright path
+                plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action=self._last_gripper_action)  # move in cartesian discrete upright path
                 if plan_result:
                     print('Move to the target position of object {} successfully, going to place it'.format(self._target_pick_object))
                 else:
@@ -603,7 +641,9 @@ class TaskPlanner(object):
                 for index in range(self._start_grasp_index if self._start_grasp_index >= 0 else 0, self._end_grasp_index if self._end_grasp_index <= len(self._pose_mapping[str_pose]) else len(self._pose_mapping[str_pose])):
                     # plan_result = self._motion_planner.move_cartesian_space(self._pose_mapping[str_pose][index], self._pick_via_up)
                     # plan_result = self._motion_planner.move_cartesian_space_discrete(self._pose_mapping[str_pose][index], self._pick_via_up)
-                    plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up)
+                    print('pick pose is {}'.format(self._pose_mapping[str_pose][index]))
+                    
+                    plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up, last_gripper_action=self._last_gripper_action)
                     if plan_result:
                         self._available_grasp_pose_index[self._target_pick_object] = index
                         rospy.loginfo('available grasp pose index: ' + str(index))
