@@ -110,6 +110,15 @@ class MotionPlanner(object):
         self._move_group.clear_pose_targets()
         rospy.sleep(1.0)
 
+    # move to specified home pose
+    def to_rest_pose(self):
+        self._rest_joints = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
+        self._move_group.set_joint_value_target(self._rest_joints)
+        to_rest_result = self._move_group.go()
+        rospy.sleep(1.0)
+        print('to home pose result:{}'.format(to_rest_result))
+        return to_rest_result
+    
     # move robot to home pose, then move from home pose to target pose
     def move_from_home_pose(self, pose_goal):
         from_home_result = True
@@ -140,14 +149,16 @@ class MotionPlanner(object):
         return from_home_result
 
     # generate cartesian straight path
-    def move_cartesian_space_upright(self, pose_goal, via_up = False):
+    def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action='pick'):
         # get a list of way points to target pose, including entrance pose, transformation needed
-
         # transform panda_ee_link goal to panda_link8 goal.
         group_goal = self.ee_goal_to_link8_goal(pose_goal)
 
         points_to_target = self.get_points_to_target_upright(group_goal)
-        for point in points_to_target:
+        for i, point in enumerate(points_to_target):
+        
+            if i==1 and last_gripper_action=='place':
+                self.to_rest_pose()
             fraction = 0
             attempts = 0
             waypoints = []

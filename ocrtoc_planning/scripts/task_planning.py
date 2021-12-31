@@ -592,7 +592,7 @@ class TaskPlanner(object):
                 print(grasp_pose)
                 grasp_pose.position.z = grasp_pose.position.z + 0.050
                 
-                plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose)  # move in cartesian discrete upright path
+                plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action=self._last_gripper_action)  # move in cartesian discrete upright path
                 if plan_result:
                     print('Move to the target position of object {} successfully, going to place it'.format(self._target_pick_object))
                 else:
@@ -603,7 +603,7 @@ class TaskPlanner(object):
                 for index in range(self._start_grasp_index if self._start_grasp_index >= 0 else 0, self._end_grasp_index if self._end_grasp_index <= len(self._pose_mapping[str_pose]) else len(self._pose_mapping[str_pose])):
                     # plan_result = self._motion_planner.move_cartesian_space(self._pose_mapping[str_pose][index], self._pick_via_up)
                     # plan_result = self._motion_planner.move_cartesian_space_discrete(self._pose_mapping[str_pose][index], self._pick_via_up)
-                    plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up)
+                    plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up, last_gripper_action=self._last_gripper_action)
                     if plan_result:
                         self._available_grasp_pose_index[self._target_pick_object] = index
                         rospy.loginfo('available grasp pose index: ' + str(index))
