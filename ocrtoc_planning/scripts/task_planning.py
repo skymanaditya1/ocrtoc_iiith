@@ -636,7 +636,7 @@ class TaskPlanner(object):
             if self._last_gripper_action == 'pick':
                 result = self.gripper_width_test()
                 if result == True:
-                    print('{} is in hand now'.format(self._target_pick_object))
+                    print('Gripper feedback: Gripping success')
                     self._pick_success = True
             else:
                 result = True

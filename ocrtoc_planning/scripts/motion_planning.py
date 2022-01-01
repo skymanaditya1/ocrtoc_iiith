@@ -5,6 +5,7 @@ import numpy as np
 import os
 import sys
 import yaml
+import tf
 
 import actionlib
 import control_msgs.msg
@@ -152,6 +153,20 @@ class MotionPlanner(object):
     def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action='pick'):
         # get a list of way points to target pose, including entrance pose, transformation needed
         # transform panda_ee_link goal to panda_link8 goal.
+        
+        if pose_goal.position.z < 0.005:
+            pose_goal.position.z = 0.01
+        
+        quaternion = [pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w]
+        
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
+        
+        print("Roll: {}, Pitch: {}, Yaw: {}".format(roll, pitch, yaw))
+        
+        quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
+        
+        pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w = quaternion
+        
         group_goal = self.ee_goal_to_link8_goal(pose_goal)
 
         points_to_target = self.get_points_to_target_upright(group_goal)

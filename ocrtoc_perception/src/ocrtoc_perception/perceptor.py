@@ -1,10 +1,14 @@
 # Author: Minghao Gou
-
+#! /usr/bin/env python
 import numpy as np
 import cv2
 from numpy.core.numeric import full
 import rospy
 import rospkg
+
+# import tf.transformations
+
+import math
 import open3d as o3d
 import open3d_plus as o3dp
 from transforms3d.quaternions import mat2quat
@@ -328,7 +332,130 @@ class Perceptor():
         # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
         return gg
 
+    # Calculates rotation matrix to euler angles
+    # The result is the same as MATLAB except the order
+    # of the euler angles ( x and z are swapped ).
+    def rotationMatrixToEulerAngles(self, R) :
+
+        sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
+
+        singular = sy < 1e-6
+
+        if  not singular :
+            x = math.atan2(R[2,1] , R[2,2])
+            y = math.atan2(-R[2,0], sy)
+            z = math.atan2(R[1,0], R[0,0])
+        else :
+            x = math.atan2(-R[1,2], R[1,1])
+            y = math.atan2(-R[2,0], sy)
+            z = 0
+
+        return x, y, z
+    
+    def assign_grasp_pose2(self, gg, object_poses):
+        grasp_poses = dict()
+        
+        dist_thresh = self.config['response']['dist_thresh']
+        object_names = []
+        
+        ts = gg.translations
+        scores = gg.scores
+        depths = gg.depths
+        rs = gg.rotation_matrices
+        
+        ts = ts + rs[:,:,0] * (np.vstack((depths, depths, depths)).T)
+        eelink_rs = np.zeros(shape = (len(rs), 3, 3), dtype = np.float32)
+        
+        eelink_rs[:,:,0] = rs[:,:,2]
+        eelink_rs[:,:,1] = -rs[:,:,1]
+        eelink_rs[:,:,2] = rs[:,:,0]
+        
+        min_object_ids = dict()
+        
+        for i, object_name in enumerate(object_poses.keys()):
+            object_names.append(object_name)
+            object_pose = object_poses[object_name]
+            
+            dists = np.linalg.norm(ts - object_pose['pose'][:3, 3], axis = 1)
+            object_mask = dists < dist_thresh
+            
+            print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
+            
+            min_object_ids[i] = object_mask
+            
+        remain_gg = [] 
+        
+        for i, object_name in enumerate(object_poses.keys()):
+            # initially, we only pick the grasp poses that is assigned 
+            # to the current object id (i)
+            
+            object_pose = object_poses[object_name]
+            
+            object_mask = min_object_ids[i]
+            
+            if np.sum(object_mask) == 0:
+                grasp_poses[object_name] = None
+                continue
+            
+            i_gg = gg[object_mask]
+            i_scores = scores[object_mask]
+            i_ts = ts[object_mask]
+            i_eelink_rs = eelink_rs[object_mask]
+            
+            # next, we only pick the grasp poses sorted according to 
+            # the confidence threshold. We only pick the top n poses.
+            
+            n = 100
+            
+            top_indices = (-i_scores).argsort()[:n]
+            top_i_gg = i_gg[top_indices]
+            top_i_eelink_rs = i_eelink_rs[top_indices]
+            top_i_ts = i_ts[top_indices]
+            
+            top_i_euler = np.array([self.rotationMatrixToEulerAngles(r) for r in top_i_eelink_rs])
+            print('Top Eulers shape', top_i_euler.shape)
+            
+            # next, we want the poses with the lowest gravitional angle
+            # we convert to euler, ideal is np.pi, 0. We sort according
+            # to the norm and then take the minimum of all the angls.
+            ideal_angle = np.array([np.pi, 0])
+            angles_scores = np.linalg.norm(ideal_angle - top_i_euler[:, :2], axis = 1)
+            print(" angle scores: {}".format(angles_scores))
+            print(" top i euler {}: ".format(top_i_euler[:, :2]))
+            
+            smallest_index = np.argmin(angles_scores)
+            print("smallest index {}".format(smallest_index))
+            print('Best pose: {}'.format(top_i_euler[smallest_index]))
+            
+            best_gg = top_i_gg[int(smallest_index)]
+            
+            remain_gg.append(best_gg.to_open3d_geometry())
+            
+            grasp_rotation_matrix = top_i_eelink_rs[smallest_index]
+            gqw, gqx, gqy, gqz = mat2quat(grasp_rotation_matrix)
+            
+            # gqx, gqy, gqz, gqw = [ 0.0005629, -0.706825, 0.707388, 0.0005633 ]
+                        
+            grasp_poses[object_name] = {
+                'x': top_i_ts[smallest_index][0],
+                'y': top_i_ts[smallest_index][1],
+                'z': top_i_ts[smallest_index][2],
+                'qw': gqw,
+                'qx': gqx,
+                'qy': gqy,
+                'qz': gqz
+            }
+    
+        return grasp_poses, remain_gg
+
     def assign_grasp_pose(self, gg, object_poses):
+        save_things = {
+            'gg': gg,
+            'object_poses': object_poses
+        }
+        
+        np.save('/root/ocrtoc_ws/src/gg.npy', save_things)
+        
         grasp_poses = dict()
         dist_thresh = self.config['response']['dist_thresh']
         # - dist_thresh: float of the minimum distance from the grasp pose center to the object center. The unit is millimeter.
@@ -476,7 +603,7 @@ class Perceptor():
         )
 
         # Assign the Best Grasp Pose on Each Object
-        grasp_poses, remain_gg = self.assign_grasp_pose(gg, object_poses)
+        grasp_poses, remain_gg = self.assign_grasp_pose2(gg, object_poses)
         if self.debug and pose_method == 'icp':
             o3d.visualization.draw_geometries([full_pcd, *remain_gg])
         return object_poses, grasp_poses
