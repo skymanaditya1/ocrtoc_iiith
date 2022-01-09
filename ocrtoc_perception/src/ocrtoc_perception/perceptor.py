@@ -16,7 +16,6 @@ import time
 import copy
 import os
 from copy import deepcopy
-from .contact_graspnet_api import to_open3d_geometry_list
 
 from graspnetAPI import GraspGroup
 
