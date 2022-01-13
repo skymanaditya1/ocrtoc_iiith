@@ -1,6 +1,7 @@
 # license
 import copy
 from math import pi
+from tokenize import group
 import numpy as np
 import os
 import sys
@@ -14,6 +15,7 @@ import moveit_commander
 import moveit_msgs.msg
 import rospkg
 import rospy
+import time
 
 from ocrtoc_common.transform_interface import TransformInterface
 
@@ -92,8 +94,50 @@ class MotionPlanner(object):
         self._ee_transform_matrix = self._transformer.ros_transform_to_matrix4x4(ee_transform.transform)
 
         self.to_home_pose()
+        # self.test()
         self.place()
         rospy.sleep(1.0)
+
+    def test(self):
+        
+        print("test 1, joint space to a goal")
+        pose_goal = Pose()
+        # pose_goal.orientation.w = 1.0
+        # pose_goal.position.x = 0.1
+        # pose_goal.position.y = 0.3
+        # pose_goal.position.z = 0.2
+        # self.move_joint_space(pose_goal)
+        
+        
+        print("test 2 joint space to rest")
+        
+        self.to_rest_pose()
+        
+        print("test 3 cartesian to goal")
+        pose_goal.orientation.w = 1.0
+        pose_goal.position.x = 0.1
+        pose_goal.position.y = -0.3
+        pose_goal.position.z = 0.2
+        # self.move_joint_space(pose_goal)
+        self.move_cartesian_space_upright(pose_goal)
+        
+        print("test 4 joint to goal")
+        
+        self.to_rest_pose()
+        
+        print("test 5 cartesian to goal")
+        pose_goal.orientation.w = 1.0
+        pose_goal.position.x = 0.1
+        pose_goal.position.y = 0.3
+        pose_goal.position.z = 0.2
+        self.move_cartesian_space_upright(pose_goal)
+        
+        print("test 6 joint to goal")
+        
+        self.to_rest_pose()
+        
+        
+
 
     # move to specified home pose
     def to_home_pose(self):
@@ -113,11 +157,73 @@ class MotionPlanner(object):
 
     # move to specified home pose
     def to_rest_pose(self):
+        
+# ('rest pose x,y,z: ', position: 
+#   x: -0.112957249941
+#   y: 2.9801544038e-05
+#   z: 0.590340135745
+# orientation: 
+#   x: -0.923949504923
+#   y: 0.382514458771
+#   z: -3.05585242637e-05
+#   w: 1.57706453844e-05)
+
+# ('rest pose x,y,z: ', position: 
+#   x: -0.112941989314
+#   y: 3.41328147894e-05
+#   z: 0.59039232584
+# orientation: 
+#   x: 0.923962395658
+#   y: -0.382483316194
+#   z: -6.25240426226e-05
+#   w: 1.82797910597e-05)
+
+        rest_pose = Pose()
+        
+        rest_pose.position.x = -0.112957249941
+        rest_pose.position.y = 2.9801544038e-05
+        rest_pose.position.z = 0.590340135745
+        rest_pose.orientation.x = -0.923949504923
+        rest_pose.orientation.y = 0.382514458771
+        rest_pose.orientation.z = -3.05585242637e-05
+        rest_pose.orientation.w = 1.57706453844e-05
+        
+        fraction = 0
+        attempts = 0
+        waypoints = []
+        group_goal = self.ee_goal_to_link8_goal(rest_pose)
+        print("group goal after tf", group_goal)
+        group_goal = rest_pose
+        
+        waypoints.append(copy.deepcopy(group_goal))
+        while fraction < 1.0 and attempts < self._max_attempts:
+            (plan, fraction) = self._move_group.compute_cartesian_path(
+                waypoints,                # way points
+                self._plan_step_length,          # step length
+                0.0,                             # disable jump
+                True                             # enable avoid_collision
+                )
+            attempts += 1
+
+        # if fraction == 1.0:
+        rospy.loginfo('Path computed successfully, moving robot')
+        self._move_group.execute(plan)
+        self._move_group.stop()
+        self._move_group.clear_pose_targets()
+        rospy.loginfo('Path execution completed')
+        move_result = True
+        
         self._rest_joints = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
+        # current_pose = self._move_group.get_current_pose(self._end_effector).pose
+        # print("rest pose x,y,z: ", current_pose)
         self._move_group.set_joint_value_target(self._rest_joints)
         to_rest_result = self._move_group.go()
-        rospy.sleep(1.0)
-        print('to home pose result:{}'.format(to_rest_result))
+        # rospy.sleep(1.0)
+        print('to rest pose result:{}'.format(to_rest_result))
+        
+        # time.sleep(10)
+        current_pose = self._move_group.get_current_pose(self._end_effector).pose
+        print("rest pose x,y,z: ", current_pose)
         return to_rest_result
     
     # move robot to home pose, then move from home pose to target pose
@@ -410,7 +516,7 @@ class MotionPlanner(object):
     def place(self):
         self._gripper_client.wait_for_server()
         goal = control_msgs.msg.GripperCommandGoal()
-        goal.command.position = 0.039
+        goal.command.position = 0.045 #0.039
         goal.command.max_effort = 30
 
         self._gripper_client.send_goal(goal)
