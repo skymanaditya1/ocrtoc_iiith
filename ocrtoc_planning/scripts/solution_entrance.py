@@ -39,10 +39,10 @@ class SolutionServer(object):
             return
 
         # Example: send feedback
-        self.feedback.text = "write_feedback_text_here"
-        self.action_server.publish_feedback(self.feedback)
-        rospy.loginfo("Pub feedback")
-        rospy.sleep(1.0)
+        # self.feedback.text = "write_feedback_text_here"
+        # self.action_server.publish_feedback(self.feedback)
+        # rospy.loginfo("Pub feedback")
+        # rospy.sleep(1.0)
 
         # Example: set status "Finished" and quit.
         self.result.status = "Finished"

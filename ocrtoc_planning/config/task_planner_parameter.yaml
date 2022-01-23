@@ -8,3 +8,6 @@ start_grasp_index: 0
 end_grasp_index: 1
 pick_via_up: False
 distance_threshold: 0.08
+
+
+debug_file: task_planning.log

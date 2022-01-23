@@ -91,3 +91,6 @@ debug_pointcloud: True
 
 contact_graspnet: False
 6dof_graspnet: True
+
+
+debug_file_name: perceptor.log
