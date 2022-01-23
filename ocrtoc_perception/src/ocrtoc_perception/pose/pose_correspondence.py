@@ -159,7 +159,7 @@ def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, 
             
             # print(f'object: {obj}, shape of image: {image.shape}, pixel predicted: {x}, {y}')
             
-            image = cv2.circle(image, (x,y), radius=60, color=(0, 0, 255), thickness=-1)
+            image = cv2.circle(image, (x,y), radius=60, color=(200, 0, 0), thickness=-1) #(189,189,189)
             
             return image
          

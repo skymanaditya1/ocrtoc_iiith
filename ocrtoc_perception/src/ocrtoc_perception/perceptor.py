@@ -209,6 +209,7 @@ class Perceptor():
             points_trans_matrix = self.get_kinect_points_transform_matrix()
             full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
             full_pcd_kinect.transform(points_trans_matrix)
+            o3d.io.write_point_cloud("/root/ocrtoc_ws/src/kin_pcd.pcd", full_pcd_kinect)
             full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
             if self.use_camera == 'both':
                 pcds.append(full_pcd_kinect)
@@ -220,7 +221,9 @@ class Perceptor():
                 #     cv2.waitKey(0)
                 #     cv2.destroyAllWindows()
                 color_images.append(kinect_image)
-
+                # cv2.imwrite("/root/ocrtoc_ws/src/kin_image.png", cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR))
+                
+                                
                 if self.debug:
                     print('points_trans_matrix:', points_trans_matrix)
                 camera_poses.append(self.get_kinect_color_transform_matrix())
@@ -232,6 +235,8 @@ class Perceptor():
                 arm_poses = np.array(self.fixed_arm_poses_both).tolist()
             for arm_pose in arm_poses:
                 self.arm_controller.exec_joint_goal(arm_pose)
+               
+                
                 rospy.sleep(2.0)
                 time.sleep(1.0)
                 color_image = self.get_color_image()
@@ -267,7 +272,7 @@ class Perceptor():
         elif self.use_camera == 'both':
             full_pcd = full_pcd_realsense
         else:
-            raise ValueError('"use_camrera" should be "kinect", "realsense" or "both"')
+            raise ValueError('"use_camera" should be "kinect", "realsense" or "both"')
         if self.debug:
             t2 = time.time()
             rospy.loginfo('Capturing data time:{}'.format(t2 - t1))
@@ -320,22 +325,22 @@ class Perceptor():
         return object_poses
 
     def compute_grasp_pose(self, full_pcd):
-        return self.compute_grasp_poses2(full_pcd)
-        # points, _ = o3dp.pcd2array(full_pcd)
-        # grasp_pcd = copy.deepcopy(full_pcd)
-        # grasp_pcd.points = o3d.utility.Vector3dVector(-points)
+        # return self.compute_grasp_poses2(full_pcd)
+        points, _ = o3dp.pcd2array(full_pcd)
+        grasp_pcd = copy.deepcopy(full_pcd)
+        grasp_pcd.points = o3d.utility.Vector3dVector(-points)
 
-        # # generating grasp poses.
-        # gg = self.graspnet_baseline.inference(grasp_pcd)
-        # gg.translations = -gg.translations
-        # gg.rotation_matrices = -gg.rotation_matrices
-        # gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
-        # gg = self.graspnet_baseline.collision_detection(gg, points)
+        # generating grasp poses.
+        gg = self.graspnet_baseline.inference(grasp_pcd)
+        gg.translations = -gg.translations
+        gg.rotation_matrices = -gg.rotation_matrices
+        gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
+        gg = self.graspnet_baseline.collision_detection(gg, points)
         
-        # print("Here are the grasp poses from the baseline {}".format(gg))
+        print("Here are the grasp poses from the baseline {}".format(gg))
 
-        # # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
-        # return gg
+        # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
+        return gg
     
     def compute_grasp_poses2(self, full_pcd):
         '''
@@ -405,7 +410,7 @@ class Perceptor():
             tx, ty, tz = grasp_pose[:3, -1]
             
             # 2. global transform part 2, here we shift the y axis a little to adjust with the baseline frame of reference.
-            grasp_pose[:3, -1] = np.array([tx, ty-0.04, tz])
+            grasp_pose[:3, -1] = np.array([tx, ty-0.038, tz])
             
             # 3. assignment of the grasp array to make it consistent with the baseline class (GraspGroup)
             # grasp_score (1), width (1), height (1), depth (1), rotation (9), translation (3), object_id (1)
@@ -421,7 +426,8 @@ class Perceptor():
         
         print('formatted shape: {}'.format(grasps.shape))
         
-        gg = GraspGroup(grasps)
+        gg = GraspGroup(grasps)        
+        # gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
         
         # 4. another transformation for axes change
         ts = gg.translations
@@ -696,12 +702,13 @@ class Perceptor():
 
         o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
         # full_pcd = o3d.io.read_point_cloud("/root/ocrtoc_ws/src/test.pcd")
-        gg, t = self.compute_grasp_pose(full_pcd)
+        # gg, t = self.compute_grasp_pose(full_pcd)
+        gg = self.compute_grasp_pose(full_pcd)
         if self.debug_pointcloud:
-            print('g pose from the return function {}'.format(t))
+            # print('g pose from the return function {}'.format(t))
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-            frame_grasp_pose.transform(t)
+            # frame_grasp_pose.transform(t)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
 
         # Computer Object 6d Poses

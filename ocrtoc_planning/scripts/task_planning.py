@@ -650,9 +650,26 @@ class TaskPlanner(object):
         cartesian_waypoints = []
         if str_pose in self._pose_mapping.keys():
             if self._last_gripper_action == 'pick':
+                
+                print("pick!!!!!1")
+                print("self._available_grasp_pose_index[self._target_pick_object]", self._available_grasp_pose_index[self._target_pick_object])
+                print("self._target_pick_object", self._target_pick_object)
+                print("str_pose", str_pose)
                 grasp_pose = self._pose_mapping[str_pose][self._available_grasp_pose_index[self._target_pick_object]]
                 # plan_result = self._motion_planner.move_cartesian_space(grasp_pose)  # move in cartesian straight path
                 # plan_result = self._motion_planner.move_cartesian_space_discrete(grasp_pose)  # move in cartesian discrete path
+                
+                orientation_q = grasp_pose.orientation
+                orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+                (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
+                print((roll, pitch, yaw))  
+                
+                if abs(yaw) > abs(np.deg2rad(135)) and abs(yaw) < abs(np.deg2rad(225)):
+                    yaw = yaw + np.pi
+                orientation_q = quaternion_from_euler(roll, pitch, yaw)
+                
+                grasp_pose.orientation = Quaternion(*orientation_q)
+                                
                 
                 print("in place")
                 print('$'*80) 
@@ -675,6 +692,8 @@ class TaskPlanner(object):
                     
                     pick_grasp_pose = self._pose_mapping[str_pose][index]
                     print("pick grasp pose")
+                    print("str_pose", str_pose)
+                    print("index", index)
                     
                     orientation_q = pick_grasp_pose.orientation
                     orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
