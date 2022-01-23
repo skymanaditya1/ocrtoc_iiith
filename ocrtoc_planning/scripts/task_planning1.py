@@ -16,6 +16,10 @@ from ocrtoc_msg.srv import PerceptionTarget, PerceptionTargetRequest
 import rospkg
 import rospy
 
+from sensor_msgs.msg import JointState
+import time
+
+
 sys.path.append(os.path.join(os.path.dirname(__file__), 'pddlstream'))
 from pddlstream.algorithms.focused import solve_focused
 from pddlstream.algorithms.incremental import solve_incremental
@@ -26,6 +30,7 @@ from pddlstream.language.generator import outputs_from_boolean
 from pddlstream.utils import user_input, read, INF
 from primitives import GRASP, collision_test, distance_fn, DiscreteTAMPState, get_shift_one_problem, get_shift_all_problem
 from viewer import DiscreteTAMPViewer, COLORS
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
 
 class TaskPlanner(object):
@@ -88,6 +93,8 @@ class TaskPlanner(object):
 
         self._goal_cartesian_pose_dic = {}
         for object_type in _goal_cartesian_pose_dic_temp:
+            # if 'clear_box' in object_type:
+            #     continue
             for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
                 self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
         self._blocks = list(self._goal_cartesian_pose_dic.keys())
@@ -97,6 +104,16 @@ class TaskPlanner(object):
         self._n_available_grasp_pose = 1
         self._last_gripper_action = 'place'
         self._target_pick_object = None
+        
+        # Added to keep a global track of remaining objects to pick and place
+        self.left_object_dic = None
+        
+        self._completed_objects = []
+        self._pick_success = True
+        
+        # Flag to check for clear boxes
+        self.clear_box_flag = False
+        
         print("number of blocks: {}".format(self._n_blocks))
         print("blocks: {}".format(self._blocks))
         print("goal cartesian poses dictionary: {}".format(self._goal_cartesian_pose_dic))
@@ -135,50 +152,88 @@ class TaskPlanner(object):
         self._available_grasp_pose_index.clear()
         rospy.loginfo(str(len(perception_result.perception_result_list)) + ' objects are graspable:')
         rospy.loginfo('Graspable objects information: ')
+        
+               
 
         for result in perception_result.perception_result_list:
-            if result.be_recognized and result.is_graspable:
-                self._available_cartesian_pose_dic[result.object_name] = result.object_pose.pose
-                self._available_grasp_pose_dic[result.object_name] = []  # pick pose list
+            if result.be_recognized: 
+                def get_rotation (quat):
+                        orientation_q = quat.orientation
+                        orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+                        (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
+                        return np.array([roll, pitch, yaw])
+                f_pose = self._goal_cartesian_pose_dic[result.object_name]
+                print("result.object_pose.pose: {}\nf_pose: {}".format(result.object_pose.pose, f_pose))
+                init_cart_coords = np.array([result.object_pose.pose.position.x, result.object_pose.pose.position.y, result.object_pose.pose.position.z])
+                final_cart_coords = np.array([f_pose.position.x, f_pose.position.y, f_pose.position.z])
+                
+                init_quat = get_rotation(result.object_pose.pose)
+                final_quat = get_rotation(f_pose)
+                
+                cart_dist = np.linalg.norm(init_cart_coords - final_cart_coords)
+                quat_dist = np.linalg.norm(init_quat - final_quat) # np.linalg.norm(result.object_pose.pose[4:7] - self._goal_cartesian_pose_dic[result.object_name][4:7])
+                cartesian_dist_thresh = 0.05
+                quaternion_dist_thresh = 0.1
+                print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
+                if 'clear_box' not in result.object_name:
+                    if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
+                        # del self._completed_objects[result.object_name]
+                        self._completed_objects.append(result.object_name)
+                        continue
+                else:
+                    if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
+                        self._completed_objects.append(result.object_name)
+                        # del self._completed_objects[result.object_name]
+                        continue
+                
+                if result.is_graspable:
+                    
+                    # rrc: Object pose and goal pose comparison happens here (the objects with similar goal and initial poses will be deleted)
+                    
+                    
+                    # rrc: Object pose and goal pose comparison ends here
+                    
+                    self._available_cartesian_pose_dic[result.object_name] = result.object_pose.pose
+                    self._available_grasp_pose_dic[result.object_name] = []  # pick pose list
 
-                # intelligence grasp strategy
-                self._available_grasp_pose_dic[result.object_name].append(result.grasp_pose.pose)  # intelligence pick pose
+                    # intelligence grasp strategy
+                    self._available_grasp_pose_dic[result.object_name].append(result.grasp_pose.pose)  # intelligence pick pose
 
-                # artificial intelligence grasp strategy
-                artificial_intelligence_grasp_pose = self.get_artificial_intelligence_grasp_pose(result.grasp_pose.pose)
-                self._available_grasp_pose_dic[result.object_name].append(artificial_intelligence_grasp_pose)  # artificial intelligence pick pose
+                    # artificial intelligence grasp strategy
+                    artificial_intelligence_grasp_pose = self.get_artificial_intelligence_grasp_pose(result.grasp_pose.pose)
+                    self._available_grasp_pose_dic[result.object_name].append(artificial_intelligence_grasp_pose)  # artificial intelligence pick pose
 
-                # artificial grasp strategy
-                artificial_grasp_pose = Pose()
-                artificial_grasp_pose.position.x = result.object_pose.pose.position.x
-                artificial_grasp_pose.position.y = result.object_pose.pose.position.y
-                artificial_grasp_pose.position.z = result.object_pose.pose.position.z + self._grasp_distance
-                artificial_grasp_pose.orientation.x = 0
-                artificial_grasp_pose.orientation.y = 1
-                artificial_grasp_pose.orientation.z = 0
-                artificial_grasp_pose.orientation.w = 0
-                self._available_grasp_pose_dic[result.object_name].append(artificial_grasp_pose)  # artificial pick pose
+                    # artificial grasp strategy
+                    artificial_grasp_pose = Pose()
+                    artificial_grasp_pose.position.x = result.object_pose.pose.position.x
+                    artificial_grasp_pose.position.y = result.object_pose.pose.position.y
+                    artificial_grasp_pose.position.z = result.object_pose.pose.position.z + self._grasp_distance
+                    artificial_grasp_pose.orientation.x = 0
+                    artificial_grasp_pose.orientation.y = 1
+                    artificial_grasp_pose.orientation.z = 0
+                    artificial_grasp_pose.orientation.w = 0
+                    self._available_grasp_pose_dic[result.object_name].append(artificial_grasp_pose)  # artificial pick pose
 
-                self._target_grasp_pose_dic[result.object_name] = []  # place pose list
+                    self._target_grasp_pose_dic[result.object_name] = []  # place pose list
 
-                # self.get_target_grasp_pose(result.object_pose.pose, result.grasp_pose.pose, self._goal_cartesian_pose_dic[result.object_name])
-                target_grasp_intelligence = \
-                    self.get_target_grasp_pose2(result.object_pose.pose, result.grasp_pose.pose, self._goal_cartesian_pose_dic[result.object_name])
-                self._target_grasp_pose_dic[result.object_name].append(target_grasp_intelligence)  # intelligence place pose
+                    # self.get_target_grasp_pose(result.object_pose.pose, result.grasp_pose.pose, self._goal_cartesian_pose_dic[result.object_name])
+                    target_grasp_intelligence = \
+                        self.get_target_grasp_pose2(result.object_pose.pose, result.grasp_pose.pose, self._goal_cartesian_pose_dic[result.object_name])
+                    self._target_grasp_pose_dic[result.object_name].append(target_grasp_intelligence)  # intelligence place pose
 
-                # self.get_target_grasp_pose(result.object_pose.pose, artificial_intelligence_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                target_grasp_pose_artificial_intelligence = \
-                    self.get_target_grasp_pose2(result.object_pose.pose, artificial_intelligence_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                self._target_grasp_pose_dic[result.object_name].append(target_grasp_pose_artificial_intelligence)  # artificial intelligence place pose
+                    # self.get_target_grasp_pose(result.object_pose.pose, artificial_intelligence_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
+                    target_grasp_pose_artificial_intelligence = \
+                        self.get_target_grasp_pose2(result.object_pose.pose, artificial_intelligence_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
+                    self._target_grasp_pose_dic[result.object_name].append(target_grasp_pose_artificial_intelligence)  # artificial intelligence place pose
 
-                # self.get_target_grasp_pose(result.object_pose.pose, artificial_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                target_grasp_artificial = \
-                    self.get_target_grasp_pose2(result.object_pose.pose, artificial_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                self._target_grasp_pose_dic[result.object_name].append(target_grasp_artificial)  # artificial place pose
+                    # self.get_target_grasp_pose(result.object_pose.pose, artificial_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
+                    target_grasp_artificial = \
+                        self.get_target_grasp_pose2(result.object_pose.pose, artificial_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
+                    self._target_grasp_pose_dic[result.object_name].append(target_grasp_artificial)  # artificial place pose
 
-                self._available_grasp_pose_index[result.object_name] = self._start_grasp_index if self._start_grasp_index >= 0 else 0
-                print('object name: {0}, frame id: {1}, cartesian pose: {2}'.format(result.object_name, result.object_pose.header.frame_id, result.object_pose.pose))
-                print('object name: {0}, frame id: {1}, grasp pose: {2}'.format(result.object_name, result.grasp_pose.header.frame_id, self._available_grasp_pose_dic[result.object_name]))
+                    self._available_grasp_pose_index[result.object_name] = self._start_grasp_index if self._start_grasp_index >= 0 else 0
+                    print('object name: {0}, frame id: {1}, cartesian pose: {2}'.format(result.object_name, result.object_pose.header.frame_id, result.object_pose.pose))
+                    print('object name: {0}, frame id: {1}, grasp pose: {2}'.format(result.object_name, result.grasp_pose.header.frame_id, self._available_grasp_pose_dic[result.object_name]))
             else:
                 pass
 
@@ -374,11 +429,21 @@ class TaskPlanner(object):
 
         # TODO check task result???
         left_object_dic = self._goal_block_pose_dic
+        self.left_object_dic = left_object_dic
+        
+        if self.search_strings(left_object_dic.keys(), searchable='clear_box'):
+            self.clear_box_flag = True
+            print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        
         while len(left_object_dic) != 0:
             # get left objects information
             rospy.loginfo('Try to get information of left objects from perception node')
+            self._completed_objects = []
             self.get_pose_perception(left_object_dic.keys())  # get pose from perception
             # self.get_fake_pose_perception(left_object_dic.keys())  # get pose from simulation environment
+            
+            if len(left_object_dic) > len(self.left_object_dic):
+                left_object_dic = self.left_object_dic
 
             # if no availabe object information get, call perception node again until the number of repeat call reach max_repeat_call
             if len(self._available_cartesian_pose_dic) == 0:
@@ -415,7 +480,10 @@ class TaskPlanner(object):
             self.target_objects_task_planning()
 
             # delete completed task, update left objects list
-            for block in self._target_cartesian_pose_dic.keys():
+            # for block in self._target_cartesian_pose_dic.keys():
+            #     del left_object_dic[block]
+            print("completed objects", self._completed_objects)
+            for block in self._completed_objects:
                 del left_object_dic[block]
 
             print('left objects: {}'.format(left_object_dic))
@@ -564,15 +632,53 @@ class TaskPlanner(object):
             r, c = pose[::-1]
             viewer.draw_block(r, c, name=state.holding, color=colors[state.holding])
 
+    def search_strings(self, string_list, searchable):
+        '''
+        Searches for a substring in a given list of strings
+        
+        Input: 
+        string_list: str (list of strings to be searched in)
+        searchable: str (substring to search for)
+        
+        Return:
+        Bool: True/False
+        '''
+        return any([searchable in x for x in string_list])
+
     # mapping move action in 2d space to cartesian space
     def mapping_move(self, str_pose):
         cartesian_waypoints = []
         if str_pose in self._pose_mapping.keys():
             if self._last_gripper_action == 'pick':
+                
+                print("pick!!!!!1")
+                print("self._available_grasp_pose_index[self._target_pick_object]", self._available_grasp_pose_index[self._target_pick_object])
+                print("self._target_pick_object", self._target_pick_object)
+                print("str_pose", str_pose)
                 grasp_pose = self._pose_mapping[str_pose][self._available_grasp_pose_index[self._target_pick_object]]
                 # plan_result = self._motion_planner.move_cartesian_space(grasp_pose)  # move in cartesian straight path
                 # plan_result = self._motion_planner.move_cartesian_space_discrete(grasp_pose)  # move in cartesian discrete path
-                plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose)  # move in cartesian discrete upright path
+                
+                orientation_q = grasp_pose.orientation
+                orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+                (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
+                print((roll, pitch, yaw))  
+                
+                if abs(yaw) > abs(np.deg2rad(135)) and abs(yaw) < abs(np.deg2rad(225)):
+                    yaw = yaw + np.pi
+                orientation_q = quaternion_from_euler(roll, pitch, yaw)
+                
+                grasp_pose.orientation = Quaternion(*orientation_q)
+                                
+                
+                print("in place")
+                print('$'*80) 
+                print(" grasp pose is")
+                print(grasp_pose)
+                
+                grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+                
+                plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action=self._last_gripper_action)  # move in cartesian discrete upright path
                 if plan_result:
                     print('Move to the target position of object {} successfully, going to place it'.format(self._target_pick_object))
                 else:
@@ -583,7 +689,25 @@ class TaskPlanner(object):
                 for index in range(self._start_grasp_index if self._start_grasp_index >= 0 else 0, self._end_grasp_index if self._end_grasp_index <= len(self._pose_mapping[str_pose]) else len(self._pose_mapping[str_pose])):
                     # plan_result = self._motion_planner.move_cartesian_space(self._pose_mapping[str_pose][index], self._pick_via_up)
                     # plan_result = self._motion_planner.move_cartesian_space_discrete(self._pose_mapping[str_pose][index], self._pick_via_up)
-                    plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up)
+                    
+                    pick_grasp_pose = self._pose_mapping[str_pose][index]
+                    print("pick grasp pose")
+                    print("str_pose", str_pose)
+                    print("index", index)
+                    
+                    orientation_q = pick_grasp_pose.orientation
+                    orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+                    (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
+                    print((roll, pitch, yaw))  
+                    
+                    if abs(yaw) > abs(np.deg2rad(135)) and abs(yaw) < abs(np.deg2rad(225)):
+                        yaw = yaw + np.pi
+                    orientation_q = quaternion_from_euler(roll, pitch, yaw)
+                    
+                    pick_grasp_pose.orientation = Quaternion(*orientation_q)
+                    self._pose_mapping[str_pose][index] = pick_grasp_pose
+                                                                                        
+                    plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up, last_gripper_action=self._last_gripper_action)
                     if plan_result:
                         self._available_grasp_pose_index[self._target_pick_object] = index
                         rospy.loginfo('available grasp pose index: ' + str(index))
@@ -611,18 +735,34 @@ class TaskPlanner(object):
         conf, holding, block_poses = state
         name, args = action
         if name == 'move':
-            rospy.loginfo('moving')
-            _, conf = args
-            x, y = conf
-            pose = np.array([x, y])
-            print('target block pose: {}'.format(str(pose)))
-            print('available block pose inverse: {}'.format(self._available_block_pose_inverse))
-            if str(pose) in self._available_block_pose_inverse.keys():
-                self._target_pick_object = self._available_block_pose_inverse[str(pose)]
-                rospy.loginfo('Going to pick the object called: ' + str(self._target_pick_object))
+            self._pick_success = True
+            
+            if self._last_gripper_action == 'pick':
+                result = self.gripper_width_test()
+                if result == True:
+                    print('Gripper feedback: Gripping success')
+                    self._pick_success = True
             else:
-                rospy.loginfo('Going to place the object called: ' + str(self._target_pick_object))
-            self.mapping_move(str(pose))
+                result = True
+            
+            if result == True:
+                rospy.loginfo('moving')
+                _, conf = args
+                x, y = conf
+                pose = np.array([x, y])
+                print('target block pose: {}'.format(str(pose)))
+                print('available block pose inverse: {}'.format(self._available_block_pose_inverse))
+                if str(pose) in self._available_block_pose_inverse.keys():
+                    self._target_pick_object = self._available_block_pose_inverse[str(pose)]
+                    rospy.loginfo('Going to pick the object called: ' + str(self._target_pick_object))
+                else:
+                    rospy.loginfo('Going to place the object called: ' + str(self._target_pick_object))
+                self.mapping_move(str(pose))
+                
+            else:
+                rospy.loginfo('couldnt grasp the object')  
+                self._pick_success = False
+                
         elif name == 'pick':
             rospy.loginfo('pick')
             holding, _, _ = args
@@ -638,6 +778,13 @@ class TaskPlanner(object):
             print('nothing in hand')
             self._motion_planner.place()
             self._last_gripper_action = name
+            
+            if self._pick_success == True:
+                self._completed_objects.append(block)
+            # print("block", block)   
+            # print("completed objects", self._completed_objects)
+            # print("left over objs", )
+            
         elif name == 'push':
             block, _, _, pose, conf = args
             holding = None
@@ -645,6 +792,19 @@ class TaskPlanner(object):
             raise ValueError(name)
         return DiscreteTAMPState(conf, holding, block_poses)
 
+    
+    def gripper_width_test(self):
+        #check if the gripper distance is zero
+        print("joint state")
+        joint_state = rospy.wait_for_message("/joint_states", JointState)
+        gripper_dist = [joint_state.position[0], joint_state.position[1]]
+        print("gripper distance is", gripper_dist)
+        if gripper_dist[0] > 0.005 and gripper_dist[1] > 0.005:
+            result = True #successully grabbed the object
+        else:
+            result = False #failed to grab the object
+        return result
+    
     def apply_plan(self, tamp_problem, plan):
         print("enter apply plan function")
         state = tamp_problem.initial

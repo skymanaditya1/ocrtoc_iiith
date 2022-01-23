@@ -118,6 +118,10 @@ class Perceptor():
         self.use_camera = self.config['use_camera']
         self.arm_controller = ArmController(topic = self.config['arm_topic'])
         self.camera_interface = CameraInterface()
+        self.graspnet_contact = self.config['contact_graspnet']
+        self.graspnet_6dof = self.config['6dof_graspnet']
+
+
         rospy.sleep(2)
         self.transform_interface = TransformInterface()
         self.transform_from_frame = self.config['transform_from_frame']
@@ -134,6 +138,11 @@ class Perceptor():
             time.sleep(2)
             self.kinect_color_transform_to_frame = self.get_kinect_color_image_frame_id()
             self.kinect_points_transform_to_frame = self.get_kinect_points_frame_id()
+
+
+        if self.graspnet_6dof:
+            self.config['reconstruction']['z_min'] = -0.0
+
         self.fixed_arm_poses = np.loadtxt(
             os.path.join(
                 rospkg.RosPack().get_path('ocrtoc_perception'),
@@ -325,7 +334,7 @@ class Perceptor():
         return object_poses
 
     def compute_grasp_pose(self, full_pcd):
-        # return self.compute_grasp_poses2(full_pcd)
+       
         points, _ = o3dp.pcd2array(full_pcd)
         grasp_pcd = copy.deepcopy(full_pcd)
         grasp_pcd.points = o3d.utility.Vector3dVector(-points)
@@ -342,7 +351,7 @@ class Perceptor():
         # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
         return gg
     
-    def compute_grasp_poses2(self, full_pcd):
+    def compute_grasp_pose2(self, full_pcd):
         '''
         Step 1: Call the contact graspnet API to generate the grasp poses
         '''
@@ -702,8 +711,11 @@ class Perceptor():
 
         o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
         # full_pcd = o3d.io.read_point_cloud("/root/ocrtoc_ws/src/test.pcd")
-        # gg, t = self.compute_grasp_pose(full_pcd)
-        gg = self.compute_grasp_pose(full_pcd)
+        
+        if self.graspnet_contact:
+            gg, t = self.compute_grasp_pose2(full_pcd)
+        if self.graspnet_6dof:
+            gg = self.compute_grasp_pose(full_pcd)
         if self.debug_pointcloud:
             # print('g pose from the return function {}'.format(t))
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
@@ -785,3 +797,4 @@ class Perceptor():
                 response_poses[object_name]['graspable'] = True
                 response_poses[object_name]['grasp_pose'] = grasp_poses[object_name]
         return response_poses
+
