@@ -664,7 +664,7 @@ class TaskPlanner(object):
                 (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
                 print((roll, pitch, yaw))  
                 
-                if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
+                if abs(yaw) > abs(np.deg2rad(120)) and abs(yaw) < abs(np.deg2rad(240)):
                     yaw = yaw + np.pi
                 orientation_q = quaternion_from_euler(roll, pitch, yaw)
                 
@@ -701,7 +701,7 @@ class TaskPlanner(object):
                     print((roll, pitch, yaw))  
                     
                     
-                    if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
+                    if abs(yaw) > abs(np.deg2rad(120)) and abs(yaw) < abs(np.deg2rad(240)):
                         yaw = yaw + np.pi
                       
                     print((roll, pitch, yaw))  
