@@ -278,7 +278,7 @@ class MotionPlanner(object):
         points_to_target = self.get_points_to_target_upright(group_goal)
         for i, point in enumerate(points_to_target):
         
-            if i==1 and last_gripper_action=='place':
+            if i==1: #and last_gripper_action=='place':
                 self.to_rest_pose()
             fraction = 0
             attempts = 0
@@ -506,7 +506,7 @@ class MotionPlanner(object):
     def pick(self):
         self._gripper_client.wait_for_server()
         goal = control_msgs.msg.GripperCommandGoal()
-        goal.command.position = -0.1
+        goal.command.position = 0.001
         goal.command.max_effort = 30
 
         self._gripper_client.send_goal(goal)
