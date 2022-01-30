@@ -87,7 +87,7 @@ response:
     mask_thresh: 0.5
 
 debug: False
-debug_pointcloud: True
+debug_pointcloud: False
 
 contact_graspnet: False
 6dof_graspnet: True

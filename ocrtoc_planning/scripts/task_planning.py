@@ -93,8 +93,8 @@ class TaskPlanner(object):
 
         self._goal_cartesian_pose_dic = {}
         for object_type in _goal_cartesian_pose_dic_temp:
-            # if 'clear_box' in object_type:
-            #     continue
+            if 'clear_box' in object_type:
+                continue
             for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
                 self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
         self._blocks = list(self._goal_cartesian_pose_dic.keys())
@@ -174,17 +174,17 @@ class TaskPlanner(object):
                 quat_dist = np.linalg.norm(init_quat - final_quat) # np.linalg.norm(result.object_pose.pose[4:7] - self._goal_cartesian_pose_dic[result.object_name][4:7])
                 cartesian_dist_thresh = 0.05
                 quaternion_dist_thresh = 0.1
-                print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
-                if 'clear_box' not in result.object_name:
-                    if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
-                        # del self._completed_objects[result.object_name]
-                        self._completed_objects.append(result.object_name)
-                        continue
-                else:
-                    if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
-                        self._completed_objects.append(result.object_name)
-                        # del self._completed_objects[result.object_name]
-                        continue
+                # print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
+                # if 'clear_box' not in result.object_name:
+                #     if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
+                #         # del self._completed_objects[result.object_name]
+                #         self._completed_objects.append(result.object_name)
+                #         continue
+                # else:
+                #     if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
+                #         self._completed_objects.append(result.object_name)
+                #         # del self._completed_objects[result.object_name]
+                #         continue
                 
                 if result.is_graspable:
                     
@@ -664,7 +664,7 @@ class TaskPlanner(object):
                 (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
                 print((roll, pitch, yaw))  
                 
-                if abs(yaw) > abs(np.deg2rad(120)) and abs(yaw) < abs(np.deg2rad(240)):
+                if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
                     yaw = yaw + np.pi
                 orientation_q = quaternion_from_euler(roll, pitch, yaw)
                 
@@ -700,8 +700,11 @@ class TaskPlanner(object):
                     (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
                     print((roll, pitch, yaw))  
                     
-                    if abs(yaw) > abs(np.deg2rad(120)) and abs(yaw) < abs(np.deg2rad(240)):
+                    
+                    if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
                         yaw = yaw + np.pi
+                      
+                    print((roll, pitch, yaw))  
                     orientation_q = quaternion_from_euler(roll, pitch, yaw)
                     
                     pick_grasp_pose.orientation = Quaternion(*orientation_q)

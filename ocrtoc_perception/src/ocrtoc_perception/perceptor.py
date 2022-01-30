@@ -292,7 +292,7 @@ class Perceptor():
     def compute_6d_pose(self, full_pcd, color_images, camera_poses, pose_method, object_list):
         camK = self.get_color_camK()
 
-        print('Camera Matrix:\n{}'.format(camK))
+        # print('Camera Matrix:\n{}'.format(camK))
         if pose_method == 'icp':
             if self.debug:
                 print('Using ICP to obtain 6d poses')
@@ -346,7 +346,7 @@ class Perceptor():
         gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
         gg = self.graspnet_baseline.collision_detection(gg, points)
         
-        print("Here are the grasp poses from the baseline {}".format(gg))
+        # print("Here are the grasp poses from the baseline {}".format(gg))
 
         # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
         return gg
@@ -385,7 +385,7 @@ class Perceptor():
         pred_grasps_cam = grasps['pred_grasps_cam'][-1]
         grasp_scores = grasps['grasp_scores'][-1]
         
-        print(pred_grasps_cam.shape, grasp_scores.shape)
+        # print(pred_grasps_cam.shape, grasp_scores.shape)
         
         '''
         Step 2: Formatting the grasp poses into the baseline grasp pose patterns
@@ -433,7 +433,7 @@ class Perceptor():
             
         grasps = np.vstack(grasps)
         
-        print('formatted shape: {}'.format(grasps.shape))
+        # print('formatted shape: {}'.format(grasps.shape))
         
         gg = GraspGroup(grasps)        
         # gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
@@ -501,7 +501,7 @@ class Perceptor():
             dists = np.linalg.norm(ts - object_pose['pose'][:3, 3], axis = 1)
             object_mask = dists < dist_thresh
             
-            print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
+            # print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
             
             min_object_ids[i] = object_mask
             
@@ -535,19 +535,19 @@ class Perceptor():
             top_i_ts = i_ts[top_indices]
             
             top_i_euler = np.array([self.rotationMatrixToEulerAngles(r) for r in top_i_eelink_rs])
-            print('Top Eulers shape', top_i_euler.shape)
+            # print('Top Eulers shape', top_i_euler.shape)
             
             # next, we want the poses with the lowest gravitional angle
             # we convert to euler, ideal is np.pi, 0. We sort according
             # to the norm and then take the minimum of all the angls.
             ideal_angle = np.array([np.pi, 0])
             angles_scores = np.linalg.norm(ideal_angle - top_i_euler[:, :2], axis = 1)
-            print(" angle scores: {}".format(angles_scores))
-            print(" top i euler {}: ".format(top_i_euler[:, :2]))
+            # print(" angle scores: {}".format(angles_scores))
+            # print(" top i euler {}: ".format(top_i_euler[:, :2]))
             
             smallest_index = np.argmin(angles_scores)
-            print("smallest index {}".format(smallest_index))
-            print('Best pose: {}'.format(top_i_euler[smallest_index]))
+            # print("smallest index {}".format(smallest_index))
+            # print('Best pose: {}'.format(top_i_euler[smallest_index]))
             
             best_gg = top_i_gg[int(smallest_index)]
             
@@ -624,9 +624,9 @@ class Perceptor():
             object_pose = object_poses[object_name]
 
             dists = np.linalg.norm(ts - object_pose['pose'][:3,3], axis=1)
-            print('distances {}'.format(dists))
+            # print('distances {}'.format(dists))
             object_mask = np.logical_and(dists < min_dists, dists < dist_thresh)
-            print('object mask {}'.format(object_mask))
+            # print('object mask {}'.format(object_mask))
 
             min_object_ids[object_mask] = i
             min_dists[object_mask] = dists[object_mask]
@@ -716,12 +716,20 @@ class Perceptor():
             gg, t = self.compute_grasp_pose2(full_pcd)
         if self.graspnet_6dof:
             gg = self.compute_grasp_pose(full_pcd)
-        if self.debug_pointcloud:
+        if self.debug_pointcloud and self.graspnet_6dof:
             # print('g pose from the return function {}'.format(t))
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             # frame_grasp_pose.transform(t)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
+
+        if self.debug_pointcloud and self.graspnet_contact:
+            # print('g pose from the return function {}'.format(t))
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+            frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+            frame_grasp_pose.transform(t)
+            o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
+
 
         # Computer Object 6d Poses
         object_poses = self.compute_6d_pose(
