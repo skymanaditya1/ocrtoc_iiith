@@ -184,6 +184,7 @@ def render_image(camera_info, models_path, models, out_dir, suffix='', radius=0.
     model_renderer = camera_renderer.ModelRenderer(camera_info,
                                                             radius)
 
+    print("Models: {}!".format(models))
     camera_renderer.render_models(model_renderer,
                                     out_dir, models_path, models, False, suffix=suffix)
 

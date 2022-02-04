@@ -274,11 +274,13 @@ class MotionPlanner(object):
         pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w = quaternion
         
         group_goal = self.ee_goal_to_link8_goal(pose_goal)
+        # group_goal = pose_goal
 
         points_to_target = self.get_points_to_target_upright(group_goal)
         for i, point in enumerate(points_to_target):
         
             if i==1 and last_gripper_action=='place':
+                
                 self.to_rest_pose()
             fraction = 0
             attempts = 0

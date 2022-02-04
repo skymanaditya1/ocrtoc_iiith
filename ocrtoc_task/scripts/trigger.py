@@ -125,4 +125,3 @@ if __name__ == '__main__':
         log_file_path = '/root/ocrtoc_ws/src/result.txt'
         with open(log_file_path, 'a+') as result_file:
             result_file.write("Task name: {} | Scene mean score: {} | Time cost: {}\n".format(task_name, scene_mean_score, time_cost))
-

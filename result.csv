@@ -1,50 +1,29 @@
-,Task name: 0-0 , Scene mean score: 0.0204573550111 , Time cost: 118.329600811
-0,Task name: 1-1-1 , Scene mean score: 0.0662141586067 , Time cost: 282.639365911
-1,Task name: 1-1-2 , Scene mean score: 0.263009047738 , Time cost: 433.846746922
-2,Task name: 1-1-3 , Scene mean score: 0.163288792932 , Time cost: 602.01098299
-3,Task name: 1-2-1 , Scene mean score: 0.45535741349 , Time cost: 520.017268181
-4,Task name: 1-2-2 , Scene mean score: 0.552927999138 , Time cost: 602.014348984
-5,Task name: 1-3-1 , Scene mean score: 0.281780452065 , Time cost: 261.037900925
-6,Task name: 1-4-1 , Scene mean score: 0.219037501409 , Time cost: 602.011806011
-7,Task name: 1-4-2 , Scene mean score: 0.382970319082 , Time cost: 602.010051966
-8,Task name: 1-5-1 , Scene mean score: 0.295512003305 , Time cost: 505.956798077
-9,Task name: 1-5-2 , Scene mean score: 0.354031927999 , Time cost: 524.227419853
-10,Task name: 1-5-3 , Scene mean score: 0.355841467848 , Time cost: 602.009807825
-11,Task name: 2-1-1 , Scene mean score: 0.454448675328 , Time cost: 602.00928688
-12,Task name: 2-1-2 , Scene mean score: 0.415717038875 , Time cost: 602.012547016
-13,Task name: 2-2-1 , Scene mean score: 0.380230394602 , Time cost: 602.013556957
-14,Task name: 2-2-2 , Scene mean score: 0.251530118579 , Time cost: 602.010634899
-15,Task name: 2-2-3 , Scene mean score: 0.380171601816 , Time cost: 602.010748863
-16,Task name: 2-2-4 , Scene mean score: 0.406198145086 , Time cost: 602.010773182
-17,Task name: 3-1-1 , Scene mean score: 0.301747236276 , Time cost: 602.008969069
-18,Task name: 3-1-2 , Scene mean score: 0.291407512542 , Time cost: 602.01109004
-19,Task name: 3-2-1 , Scene mean score: 0.490792992822 , Time cost: 602.010427952
-20,Task name: 3-2-2 , Scene mean score: 0.49264615132 , Time cost: 602.01174283
-21,Task name: 3-3-1 , Scene mean score: 0.271915328563 , Time cost: 602.010798931
-22,Task name: 3-3-2 , Scene mean score: 0.30663106022 , Time cost: 602.010229111
-23,Task name: 4-1-1 , Scene mean score: 0.191238605252 , Time cost: 602.011273861
-24,Task name: 4-1-2 , Scene mean score: 0.174830923419 , Time cost: 602.011030912
-25,Task name: 4-2-1 , Scene mean score: 0.31686824167 , Time cost: 602.009922981
-26,Task name: 4-2-2 , Scene mean score: 0.316022668616 , Time cost: 602.009349108
-27,Task name: 4-2-3 , Scene mean score: 0.276274539154 , Time cost: 602.010160923
-28,Task name: 4-2-4 , Scene mean score: 0.331119249923 , Time cost: 602.011720896
-29,Task name: 4-3-1 , Scene mean score: 0.27126450852 , Time cost: 602.009258032
-30,Task name: 4-3-2 , Scene mean score: 0.27148127656 , Time cost: 602.011233091
-31,Task name: 4-3-3 , Scene mean score: 0.271784998724 , Time cost: 602.009660959
-32,Task name: 4-3-4 , Scene mean score: 0.270439753169 , Time cost: 602.0106709
-33,Task name: 5-1-1 , Scene mean score: 0.282810515661 , Time cost: 602.010423899
-34,Task name: 5-1-2 , Scene mean score: 0.284130544875 , Time cost: 602.009446859
-35,Task name: 5-1-3 , Scene mean score: 0.278135719285 , Time cost: 602.009689093
-36,Task name: 5-2-1 , Scene mean score: 0.253713143067 , Time cost: 602.012847185
-37,Task name: 5-2-2 , Scene mean score: 0.261653738548 , Time cost: 602.011142015
-38,Task name: 5-3-1 , Scene mean score: 0.333691378847 , Time cost: 602.009596825
-39,Task name: 5-3-2 , Scene mean score: 0.333777590651 , Time cost: 602.010607004
-40,Task name: 5-3-3 , Scene mean score: 0.333281176278 , Time cost: 602.010992765
-41,Task name: 6-1-1 , Scene mean score: 0.216968693996 , Time cost: 602.010806084
-42,Task name: 6-1-2 , Scene mean score: 0.213817554751 , Time cost: 602.010313988
-43,Task name: 6-2-1 , Scene mean score: 0.42859418966 , Time cost: 602.01049304
-44,Task name: 6-2-2 , Scene mean score: 0.428665790895 , Time cost: 602.011727095
-45,Task name: 6-2-3 , Scene mean score: 0.433520923249 , Time cost: 602.009902
-46,Task name: 6-3-1 , Scene mean score: 0.433199722378 , Time cost: 602.010191917
-47,Task name: 6-3-2 , Scene mean score: 0.433944953486 , Time cost: 602.01116991
-48,Task name: 6-3-3 , Scene mean score: 0.433378402692 , Time cost: 602.010372877
+,Task : 0-0 ,   0.0956556576767 ,   141.538554907
+0,Task : 1-1-1 ,   0.174255827323 ,   602.010556936
+1,Task : 1-1-2 ,   0.339916009108 ,   602.009319067
+2,Task : 1-1-3 ,   0.340864110103 ,   602.009840012
+3,Task : 1-2-1 ,   0.406475940402 ,   602.010622025
+4,Task : 1-2-2 ,   0.423552993086 ,   602.009237051
+5,Task : 1-3-1 ,   0.199941211183 ,   602.011247158
+6,Task : 1-4-1 ,   0.321110384382 ,   602.01104784
+7,Task : 1-4-2 ,   0.331166037626 ,   602.011387825
+8,Task : 1-5-1 ,   0.355619471584 ,   602.010766029
+9,Task : 1-5-2 ,   0.354419872262 ,   602.011373043
+10,Task : 1-5-3 ,   0.356269938513 ,   602.009834051
+11,Task : 2-1-1 ,   0.454335358002 ,   602.009982109
+12,Task : 2-1-2 ,   0.415629062976 ,   602.009771109
+13,Task : 2-2-1 ,   0.379886998128 ,   602.010746956
+14,Task : 2-2-2 ,   0.406561458777 ,   602.009063005
+15,Task : 2-2-3 ,   0.380161374797 ,   602.012420177
+16,Task : 2-2-4 ,   0.406237319495 ,   602.009642124
+17,Task : 3-1-1 ,   0.302701870161 ,   602.010812998
+18,Task : 3-1-2 ,   0.292109671682 ,   602.010246992
+19,Task : 3-2-1 ,   0.490542546672 ,   602.010098934
+20,Task : 3-2-2 ,   0.492758955269 ,   602.00983119
+21,Task : 3-3-1 ,   0.272275422006 ,   602.009102821
+22,Task : 3-3-2 ,   0.307165667393 ,   602.011116982
+23,Task : 4-1-1 ,   0.191908432013 ,   602.009219885
+24,Task : 4-1-2 ,   0.174638475387 ,   602.009993076
+25,Task : 4-2-1 ,   0.316349636954 ,   602.01070714
+26,Task : 4-2-2 ,   0.316850317559 ,   602.01048398
+27,Task : 4-2-3 ,   0.275625058886 ,   602.01124382

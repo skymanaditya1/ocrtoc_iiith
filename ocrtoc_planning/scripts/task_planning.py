@@ -1,7 +1,19 @@
+'''Heuristic Graph-based planner
+This graph based planner handles final scene stacking and replacement scenarios very robustly
+
+Team RRC
+Author: Vishal Reddy Mandadi
+
+Assumptions:
+1. We get the semantic information about stacking from scene graph generators or related methods
+'''
+
 from __future__ import print_function
 import argparse
 import copy
 import math
+from platform import node
+from unicodedata import name
 import numpy as np
 import transforms3d
 import os
@@ -19,18 +31,205 @@ import rospy
 from sensor_msgs.msg import JointState
 import time
 
-
-sys.path.append(os.path.join(os.path.dirname(__file__), 'pddlstream'))
-from pddlstream.algorithms.focused import solve_focused
-from pddlstream.algorithms.incremental import solve_incremental
-from pddlstream.language.constants import And, Equal, TOTAL_COST, print_solution
-from pddlstream.language.generator import from_gen_fn, from_fn, from_test
-from pddlstream.language.stream import StreamInfo
-from pddlstream.language.generator import outputs_from_boolean
-from pddlstream.utils import user_input, read, INF
-from primitives import GRASP, collision_test, distance_fn, DiscreteTAMPState, get_shift_one_problem, get_shift_all_problem
-from viewer import DiscreteTAMPViewer, COLORS
+# from primitives import GRASP, collision_test, distance_fn, DiscreteTAMPState, get_shift_one_problem, get_shift_all_problem
+# from viewer import DiscreteTAMPViewer, COLORS
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
+
+# Imports for camera related stuff
+from numpy.core.numeric import full
+import cv2
+import open3d as o3d
+# import open3d_plus as o3dp
+# import open3d_plus as o3dp
+# from .arm_controller_for_task_planner import ArmController
+from ocrtoc_common.camera_interface import CameraInterface
+# from ocrtoc_common.transform_interface import TransformInterface
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
+
+
+# Miscellineous functions class - contains functions from https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py 
+# As open3d_plus import failed (due to unknown reasons - TO BE FIXED)
+class MiscFunctions:
+    '''
+    Open3d_plus library functions taken from - https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py
+    Due to open3d_plus import failure
+    '''
+    def __init__(self):
+        pass
+    
+    def array2pcd(self, points, colors):
+        """
+        Convert points and colors into open3d point cloud.
+        Args:
+            points(np.array): coordinates of the points.
+            colors(np.array): RGB values of the points.
+        Returns:
+            open3d.geometry.PointCloud: the point cloud.
+        """
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+        return pcd
+
+    def pcd2array(self, pcd):
+        """
+        Convert open3d point cloud into points and colors.
+        Args:
+            pcd(open3d.geometry.PointCloud): the point cloud.
+        Returns:
+            np.array, np.array: coordinates of the points, RGB values of the points.
+        """
+        points = np.asarray(pcd.points)
+        colors = np.asarray(pcd.colors)
+        return points, colors
+    
+class OccupancyAndBuffer:
+    def __init__(self):
+        pass
+    
+    def generate_2D_occupancy_map(self, world_dat, x_min=None, y_min=None, x_range=None, y_range=None, threshold=3, dir_path='/root/occ_map.png'):
+        '''
+        A non-traditional way to mark occupied areas on a grid. In this method, we simply look for 
+        areas with z>threshold (threshold~0) and mark them as occupied. This is expected to be highly
+        effective for OCRTOC
+        '''
+        if x_range == None:
+            x_range = int(np.round(np.max(world_dat[:, 0]))-np.round(np.min(world_dat[:, 0])))
+            print("x_range: {}".format(x_range))
+        if y_range == None:
+            y_range = int(np.round(np.max(world_dat[:, 1]))-np.round(np.min(world_dat[:, 1])))
+            print("y_range: {}".format(y_range))
+        # Since, pixels have integral coordinates, let us round off all the values in world_dat and remove y coordinates
+        world_dat_rounded = (np.round(world_dat)).astype(int)
+        # world_dat_rounded = (np.delete(world_dat_rounded, 2, 1)).astype(int) # Remove y coordinates column
+        if x_min == None:
+            x_min = (np.round(np.min(world_dat[:, 0]))).astype(int)
+            print("x_min: {}".format(x_min))
+        if y_min == None:
+            y_min = (np.round(np.min(world_dat[:, 1]))).astype(int)
+            print("y_min: {}".format(y_min))
+
+        pixel_counts = np.zeros(shape=(x_range+1, y_range+1), dtype=float)
+        count = 0
+        for point in world_dat_rounded:
+            #print(point-np.array([x_min, z_min], dtype=int))
+            x_coord = point[0]-x_min
+            y_coord = point[1] - y_min
+            if x_coord > x_range or y_coord > y_range or x_coord < 0 or y_coord < 0:
+                continue
+            if point[2] > 0:
+                pixel_counts[point[0]-x_min, point[1]-y_min]+=1
+
+        mean_points = 1# np.mean(pixel_counts)
+        occ_map = np.zeros(shape=pixel_counts.shape, dtype=np.uint8)
+        for i in range(x_range):
+            for j in range(y_range):
+                if pixel_counts[i, j] >= threshold:
+                    occ_map[i, j] = 1 # Occupied
+
+        import cv2
+        cv2.imwrite(dir_path,(occ_map * 255).astype(np.uint8))
+        # cv2.imshow('Occupancy map', (occ_map * 255).astype(np.uint8))
+        # cv2.waitKey(0)
+
+        print(pixel_counts)
+
+        return occ_map
+    
+    def visualize_pcd_with_global_coordinate_frame(self, pcd):
+        mesh_frame1 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[0, 0, 0])
+        mesh_frame2 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[-0.3, -.6, 0])
+        mesh_frame3 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[.3, -.6, 0])
+        mesh_frame4 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[.3, .6, 0])
+        mesh_frame5 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[-.3, .6, 0])
+        o3d.visualization.draw_geometries([pcd, mesh_frame1, mesh_frame2, mesh_frame3, mesh_frame4, mesh_frame5])
+        
+    def get_closest_to(self, empty_spots, target_pos = np.array([.0, .0]), collision_diameter=0.1):
+        distances = np.linalg.norm(empty_spots - target_pos, axis=1) 
+        valid_empties = []
+        valid_distances = []
+        for i in range(len(empty_spots)):
+            if distances[i] > collision_diameter:
+                valid_empties.append(empty_spots[i])
+                valid_distances.append(distances[i])
+        print("Valid distances: {}".format(valid_distances))
+        closest_ind = np.argmin(np.array(valid_distances))
+        print("Closest_ind: {}".format(closest_ind))
+        print("Closest vector: {}".format(valid_empties[closest_ind]))
+        # print(distances)
+        # print("Valid empties: {}".format(valid_empties))
+        return valid_empties[closest_ind]
+    
+    
+    def get_empty_spot(self, pcd = [], occ_map = [], closest_target = np.array([])):
+        '''
+        First get occupancy grid for the given point cloud. Now, use the coordinates of unoccupied cells
+        as buffers (scale them down and transform them approximately).
+        '''
+        # self.visualize_pcd_with_global_coordinate_frame(pcd)
+        if len(occ_map) == 0:
+            occ_map = self.generate_2D_occupancy_map(np.asarray(pcd.points)*100, threshold=1, dir_path='./results/occ_map=2-2-2.png')
+        print("occ_map shape: {}".format(occ_map.shape))
+        # convert_to_occupancy_map(np.asarray(pcd.points)*100, threshold=500, dir_path='./results/occ_map_thr=1.png')
+        # x_limits = [-.3, .3]
+        # y_limits = [-.6, .6]
+
+        # Generating empty spots (random sampling)
+        x_lims, y_lims = occ_map.shape
+        zero_coords = np.where(occ_map == 0)
+        print(zero_coords, type(zero_coords))
+        empty_spots = np.zeros(shape=(len(zero_coords[0]), 2), dtype=float)
+        empty_spots[:, 0] = zero_coords[0]
+        empty_spots[:, 1] = zero_coords[1]
+        empty_spots = (empty_spots/100) - np.array([0.3, 0.6], dtype=float)
+        print(empty_spots, type(empty_spots), empty_spots.shape)
+
+        closest_empty_spot = None
+        if len(closest_target) == 0:
+            closest_empty_spot = self.get_closest_to(empty_spots)
+        else:
+            closest_empty_spot = self.get_closest_to(empty_spots, target_pos=closest_target)
+        return closest_empty_spot
+        # mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[closest_empty_spot[0], closest_empty_spot[1], 0])
+        # o3d.visualization.draw_geometries([pcd, mesh_frame])
+
+# Red Black Graph (Data structure)
+class RedBlackNode:
+    def __init__(self, name, node_type):
+        '''
+        Parameters
+        name: Name of the object that it is related to
+        node_type: 'r' or 'b' (red implies initial/virtual object poses, black implies target or completed initial poses)
+        
+        Attributes:
+        self.name: str: Unique identifier for each node (name+type)
+        self.object: str: Name of the object associated with the node
+        self.type: str: Type of node (red or black)
+        self.target_black: list: Target black node for this node if this node is red
+        self.done: boolean: If true, this node is done (task associated with it (pick-place) is done)
+        self.occupied: boolean: If true, this node is partially occupied, otherwise, it is free
+        self.prev_node_in_stack: Reference to the black node that is under the current pose in stack if the current node is black
+        self.next_node_in_stack: Reference to the black node that is above the current pose in stack if the current node is black
+        '''
+        self.name = "{}_{}".format(name, node_type)
+        self.object = name
+        self.type = node_type
+        # self.attached_red_nodes = []
+        self.target_black = []
+        self.done = False
+        self.occupied = False
+        self.prev_node_in_stack = None
+        self.next_node_in_stack = None
+        self.pose = None
+        self.pick_grasp_pose = None
+        self.place_grasp_pose = None
+        
+        self.pickable = False # Will be set to true if we get valid pick grasp and pose of the object (only for red node)
+        
+    def set_done(self):
+        self.done = True
+        self.type = 'b'
+        
 
 
 class TaskPlanner(object):
@@ -67,69 +266,122 @@ class TaskPlanner(object):
         self._service_get_sim_pose = rospy.ServiceProxy('/get_model_state', GetModelState)
         self._service_get_target_pose = rospy.ServiceProxy('/perception_action_target', PerceptionTarget)
         self._service_get_fake_pose = rospy.ServiceProxy('/fake_perception_action_target', PerceptionTarget)
-        self._algorithm_arc = 'focused'  # 'incremental'
         self._world_axis_z = np.array([0, 0, 1])
-        self._unit_arc = False
         self._transformer = TransformInterface()
         self._motion_planner = MotionPlanner()
-        self._n_repeat_call = 0
-        self._blocks = blocks
-        self._initial_cartesian_poses = []
-        self._current_block_poses = {}
-        self.simplify_task(goal_cartesian_poses)
-        self._n_blocks = len(blocks)
-        self._temp_block_poses = []
-        self._temp_cartesian_poses = []
-        self._available_block_pose_dic = {}
-        self._available_cartesian_pose_dic = {}
-        self._available_grasp_pose_dic = {}
-        self._goal_block_pose_dic = {}
-        self._target_cartesian_pose_dic = {}
-        self._target_block_pose_dic = {}
-        self._pose_mapping = {}
-        self._target_grasp_pose_dic = {}
-        # Handling duplicate objects over here.
-        _goal_cartesian_pose_dic_temp = dict(zip(self._blocks, self._goal_cartesian_poses))
-
-        self._goal_cartesian_pose_dic = {}
-        for object_type in _goal_cartesian_pose_dic_temp:
-            # if 'clear_box' in object_type:
-            #     continue
-            for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
-                self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
-        self._blocks = list(self._goal_cartesian_pose_dic.keys())
-
-        self._available_grasp_pose_index = {}
-        self._available_block_pose_inverse = {}
-        self._n_available_grasp_pose = 1
-        self._last_gripper_action = 'place'
-        self._target_pick_object = None
         
-        # Added to keep a global track of remaining objects to pick and place
-        self.left_object_dic = None
+        # Setting up camera interfaces
+        self.arm_topic= 'arm_controller/command'
+        self.color_info_topic_name= '/realsense/color/camera_info'
+        self.color_topic_name= '/realsense/color/image_raw'
+        self.depth_topic_name= '/realsense/aligned_depth_to_color/image_raw'
+        self.points_topic_name= '/realsense/depth/points'
+        self.kinect_color_topic_name= '/kinect/color/image_rect_color'
+        self.kinect_depth_topic_name= '/kinect/depth_to_color/image_raw'
+        self.kinect_points_topic_name= '/kinect/depth/points'
+        self.transform_from_frame= 'world'
         
-        self._completed_objects = []
-        self._pick_success = True
+        # self.arm_controller = ArmController(topic = self.config['arm_topic'])
+        self.camera_interface = CameraInterface()
+        self.transform_interface = TransformInterface()
+        # Subscribing to realsense and setting it up (camera attached to arm's end effector link)
+        self.camera_interface.subscribe_topic(self.color_info_topic_name, CameraInfo)
+        self.camera_interface.subscribe_topic(self.color_topic_name, Image)
+        self.camera_interface.subscribe_topic(self.points_topic_name, PointCloud2)
+        time.sleep(2)
+        self.color_transform_to_frame = self.get_color_image_frame_id()
+        self.points_transform_to_frame = self.get_points_frame_id()
         
-        # Flag to check for clear boxes
+        # Subscribing to kinect and setting it up (external camera)
+        self.camera_interface.subscribe_topic(self.kinect_color_topic_name, Image)
+        self.camera_interface.subscribe_topic(self.kinect_points_topic_name, PointCloud2)
+        time.sleep(2)
+        self.kinect_color_transform_to_frame = self.get_kinect_color_image_frame_id()
+        self.kinect_points_transform_to_frame = self.get_kinect_points_frame_id()
+        
+        # Reconstruction config
+        self.reconstruction_config = {
+            'x_min': -0.20,
+            'y_min': -0.6,
+            'z_min': 0.0, # z_min: -0.05
+            'x_max': 0.3,
+            'y_max': 0.6,
+            'z_max': 0.4,
+            'nb_neighbors': 50,
+            'std_ratio': 2.0,
+            'voxel_size': 0.0015,
+            'icp_max_try': 5,
+            'icp_max_iter': 2000,
+            'translation_thresh': 3.95,
+            'rotation_thresh': 0.02,
+            'max_correspondence_distance': 0.02
+        }
+        
         self.clear_box_flag = False
         
-        print("number of blocks: {}".format(self._n_blocks))
-        print("blocks: {}".format(self._blocks))
-        print("goal cartesian poses dictionary: {}".format(self._goal_cartesian_pose_dic))
+        # MiscFunctions class instance named o3dp (as it is same as o3dp (since the import failed, we are directly using the source code 
+        #   from the repo))
+        self.o3dp = MiscFunctions()
+        
+        # Occupancy map and buffer spot sampler class
+        self.occ_and_buffer = OccupancyAndBuffer()
+        
+        
+        self.block_labels = blocks
+        self.object_goal_pose_dict = self.get_goal_pose_dict(self.block_labels, goal_cartesian_poses)
+        self.block_labels_with_duplicates = self.object_goal_pose_dict.keys()
+        
+        self.object_init_pose_dict = {}
+        self.object_pick_grasp_pose_dict = {}
+        self.object_place_grasp_pose_dict = {}
+        self.detected_object_label_list = []
+        self.red_nodes = []
+        self.black_nodes = []
+        
+        print("#"*40)
+        print("Block labels: {}".format(self.block_labels))
+        print("Goal pose dictionary: {}".format(self.object_goal_pose_dict))
+        print("#"*40)
         print("task planner constructed")
 
-    def simplify_task(self, goal_cartesian_poses):
-        self._goal_cartesian_poses = []
-        for i in goal_cartesian_poses:
-            self._goal_cartesian_poses.append(i.poses)
+    # def get_goal_pose_list_from_input(self, goal_cartesian_poses):
+    #     '''
+    #     The task information is very crude. This function helps us extract the goal poses from task information 
+    #     and returns a list of goal poses
+    #     '''
+    #     goal_poses = []
+    #     for goal in goal_cartesian_poses:
+    #         pose = goal.poses[0]
+    #         goal_poses.append(pose)
+    #     return goal_poses
+    
+    def get_goal_pose_dict(self, block_labels, goal_poses):
+        '''
+        Given a list of goal poses and block labels, this function returns a dictionary with labels as keys
+        
+        Parameters:
+        block_labels: List of labels (strings)
+        goal_poses: List of lists of block poses 
+        '''
+        goal_pose_dict = {}
+        # print(zip(block_labels, goal_poses))
+        for label, poses in zip(block_labels, goal_poses):
+            print("Poses: {}".format(poses))
+            print("Poses type: {}".format(type(poses)))
+            for i, pose in enumerate(poses.poses):
+                goal_pose_dict["{}_v{}".format(label, i)] = pose
+            # goal_pose_dict[label] = pose
+        return goal_pose_dict    
 
     def get_pose_perception(self, target_object_list):
-        """Get current poses of target objects from perception node.
-
-        :param target_object_list: A list of target object names
         """
-
+        This function gets current and pick grasp poses from the perception node. It then updates object_init_pose_dict, 
+        object_pick_grasp_pose_dict and object_place_grasp_pose_dict. Place grasp poses have same orienatation as pick 
+        grasp poses. Their position will be equal to target pose of the object, with modified z (position.z += thresh), 
+        as we are trying to drop the object from certain height instead of placing it precisely in its position.
+        
+        :param target_object_list: A list of target object names (with duplicate objects named as _v<duplicate_number>)
+        
         # perception service message:
         # string[] target_object_list
         # ---
@@ -140,16 +392,17 @@ class TaskPlanner(object):
         # geometry_msgs/PoseStamped object_pose
         # bool is_graspable
         # geometry_msgs/PoseStamped grasp_pose
+        """
         rospy.wait_for_service('/perception_action_target')
         request_msg = PerceptionTargetRequest()
         request_msg.target_object_list = target_object_list
+        print("Target object_list: {}".format(target_object_list))
         rospy.loginfo('Start to call perception node')
         perception_result = self._service_get_target_pose(request_msg)
         rospy.loginfo('Perception finished')
-
-        self._available_cartesian_pose_dic.clear()
-        self._available_grasp_pose_dic.clear()
-        self._available_grasp_pose_index.clear()
+        
+        print("Perception result: {}".format(perception_result))
+        
         rospy.loginfo(str(len(perception_result.perception_result_list)) + ' objects are graspable:')
         rospy.loginfo('Graspable objects information: ')
         
@@ -162,8 +415,11 @@ class TaskPlanner(object):
                         orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
                         (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
                         return np.array([roll, pitch, yaw])
-                f_pose = self._goal_cartesian_pose_dic[result.object_name]
+                f_pose = self.object_goal_pose_dict[result.object_name] #self._goal_cartesian_pose_dic[result.object_name]
                 print("result.object_pose.pose: {}\nf_pose: {}".format(result.object_pose.pose, f_pose))
+                
+                # rrc: Object pose and goal pose comparison happens here (the objects with similar goal and initial poses will be deleted)
+                
                 init_cart_coords = np.array([result.object_pose.pose.position.x, result.object_pose.pose.position.y, result.object_pose.pose.position.z])
                 final_cart_coords = np.array([f_pose.position.x, f_pose.position.y, f_pose.position.z])
                 
@@ -173,90 +429,34 @@ class TaskPlanner(object):
                 cart_dist = np.linalg.norm(init_cart_coords - final_cart_coords)
                 quat_dist = np.linalg.norm(init_quat - final_quat) # np.linalg.norm(result.object_pose.pose[4:7] - self._goal_cartesian_pose_dic[result.object_name][4:7])
                 cartesian_dist_thresh = 0.05
-                quaternion_dist_thresh = 0.1
+                quaternion_dist_thresh = 0.001
                 print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
                 if 'clear_box' not in result.object_name:
                     if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
                         # del self._completed_objects[result.object_name]
-                        self._completed_objects.append(result.object_name)
                         continue
                 else:
                     if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
-                        self._completed_objects.append(result.object_name)
                         # del self._completed_objects[result.object_name]
                         continue
                 
+                # rrc: Object pose and goal pose comparison ends here
+                
                 if result.is_graspable:
                     
-                    # rrc: Object pose and goal pose comparison happens here (the objects with similar goal and initial poses will be deleted)
+                    self.object_init_pose_dict[result.object_name] = result.object_pose.pose
+                    self.object_pick_grasp_pose_dict[result.object_name] = copy.deepcopy(result.grasp_pose.pose)
                     
+                    self.object_place_grasp_pose_dict[result.object_name] = self.get_target_grasp_pose2(result.object_pose.pose, result.grasp_pose.pose, self.object_goal_pose_dict[result.object_name])
                     
-                    # rrc: Object pose and goal pose comparison ends here
+                    # self.object_place_grasp_pose_dict[result.object_name] = copy.deepcopy(result.grasp_pose.pose)
+                    # self.object_place_grasp_pose_dict[result.object_name].position.z += 0.2 # Dropping from certain minimal height
                     
-                    self._available_cartesian_pose_dic[result.object_name] = result.object_pose.pose
-                    self._available_grasp_pose_dic[result.object_name] = []  # pick pose list
-
-                    # intelligence grasp strategy
-                    self._available_grasp_pose_dic[result.object_name].append(result.grasp_pose.pose)  # intelligence pick pose
-
-                    # artificial intelligence grasp strategy
-                    artificial_intelligence_grasp_pose = self.get_artificial_intelligence_grasp_pose(result.grasp_pose.pose)
-                    self._available_grasp_pose_dic[result.object_name].append(artificial_intelligence_grasp_pose)  # artificial intelligence pick pose
-
-                    # artificial grasp strategy
-                    artificial_grasp_pose = Pose()
-                    artificial_grasp_pose.position.x = result.object_pose.pose.position.x
-                    artificial_grasp_pose.position.y = result.object_pose.pose.position.y
-                    artificial_grasp_pose.position.z = result.object_pose.pose.position.z + self._grasp_distance
-                    artificial_grasp_pose.orientation.x = 0
-                    artificial_grasp_pose.orientation.y = 1
-                    artificial_grasp_pose.orientation.z = 0
-                    artificial_grasp_pose.orientation.w = 0
-                    self._available_grasp_pose_dic[result.object_name].append(artificial_grasp_pose)  # artificial pick pose
-
-                    self._target_grasp_pose_dic[result.object_name] = []  # place pose list
-
-                    # self.get_target_grasp_pose(result.object_pose.pose, result.grasp_pose.pose, self._goal_cartesian_pose_dic[result.object_name])
-                    target_grasp_intelligence = \
-                        self.get_target_grasp_pose2(result.object_pose.pose, result.grasp_pose.pose, self._goal_cartesian_pose_dic[result.object_name])
-                    self._target_grasp_pose_dic[result.object_name].append(target_grasp_intelligence)  # intelligence place pose
-
-                    # self.get_target_grasp_pose(result.object_pose.pose, artificial_intelligence_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                    target_grasp_pose_artificial_intelligence = \
-                        self.get_target_grasp_pose2(result.object_pose.pose, artificial_intelligence_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                    self._target_grasp_pose_dic[result.object_name].append(target_grasp_pose_artificial_intelligence)  # artificial intelligence place pose
-
-                    # self.get_target_grasp_pose(result.object_pose.pose, artificial_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                    target_grasp_artificial = \
-                        self.get_target_grasp_pose2(result.object_pose.pose, artificial_grasp_pose, self._goal_cartesian_pose_dic[result.object_name])
-                    self._target_grasp_pose_dic[result.object_name].append(target_grasp_artificial)  # artificial place pose
-
-                    self._available_grasp_pose_index[result.object_name] = self._start_grasp_index if self._start_grasp_index >= 0 else 0
-                    print('object name: {0}, frame id: {1}, cartesian pose: {2}'.format(result.object_name, result.object_pose.header.frame_id, result.object_pose.pose))
-                    print('object name: {0}, frame id: {1}, grasp pose: {2}'.format(result.object_name, result.grasp_pose.header.frame_id, self._available_grasp_pose_dic[result.object_name]))
+                    self.detected_object_label_list.append(result.object_name)
             else:
                 pass
-
-    # get pose from simulation environment
-    def get_fake_pose_perception(self, target_object_list):
-        rospy.wait_for_service('/fake_perception_action_target')
-        request_msg = PerceptionTargetRequest()
-        request_msg.target_object_list = target_object_list
-        perception_result = self._service_get_fake_pose(request_msg)
-        self._available_cartesian_pose_dic.clear()
-        self._available_grasp_pose_dic.clear()
-        for result in perception_result.perception_result_list:
-            if result.be_recognized and result.is_graspable:
-                self._available_cartesian_pose_dic[result.object_name] = result.object_pose.pose
-                self._available_grasp_pose_dic[result.object_name] = result.grasp_pose.pose
-                self._target_grasp_pose_dic[result.object_name] = \
-                self.get_target_grasp_pose(result.object_pose.pose, result.grasp_pose.pose, self._goal_cartesian_pose_dic[result.object_name])
-            else:
-                pass
-        rospy.loginfo('fake pose obtained')
-        print('available objects and cartesian pose: {}'.format(self._available_cartesian_pose_dic))
-        print('available objects and grasp pose: {}'.format(self._available_grasp_pose_dic))
-        print('available objects target grasp pose: {}'.format(self._target_grasp_pose_dic))
+            
+    
 
     # modulate intelligence grasp pose to avoid collision
     def get_artificial_intelligence_grasp_pose(self, intelligence_grasp_pose):
@@ -332,292 +532,454 @@ class TaskPlanner(object):
         grasp_pose2 = self._transformer.matrix4x4_to_ros_pose(grasp_pose2_matrix)
 
         return grasp_pose2
-
-    # judge whether two objects are stacked
-    def is_stacked(self, pose1, pose2):
-        plane_distance = math.sqrt((pose1.position.x - pose2.position.x)**2 + (pose1.position.y - pose2.position.y)**2)
-        return True if plane_distance < self._distance_threshold else False
-
-    # construct pose transformation of initial objects
-    def available_pose_transformation(self):
-        sorted_available_cartesian_pose_list = sorted(self._available_cartesian_pose_dic.items(), key=lambda obj: obj[1].position.z)
-        print("sorted available cartesian pose list element: {}".format(sorted_available_cartesian_pose_list[0]))
-        print("sub element1: {0}, sub element2: {1}".format(sorted_available_cartesian_pose_list[0][0], sorted_available_cartesian_pose_list[0][1]))
-        blocks_x = 0
-        self._available_block_pose_dic.clear()
-        for i in range(len(sorted_available_cartesian_pose_list)):
-            if i == 0:
-                self._available_block_pose_dic[sorted_available_cartesian_pose_list[0][0]] = np.array([0, 0])
-                blocks_x += 1
-            else:
-                for j in range(i):
-                    if self.is_stacked(sorted_available_cartesian_pose_list[j][1], sorted_available_cartesian_pose_list[i][1]):
-                        x, y = self._available_block_pose_dic[sorted_available_cartesian_pose_list[j][0]]
-                        y += 1
-                        self._available_block_pose_dic[sorted_available_cartesian_pose_list[i][0]] = np.array([x, y])
-                    elif j == (i - 1):
-                        self._available_block_pose_dic[sorted_available_cartesian_pose_list[i][0]] = np.array([blocks_x, 0])
-                        blocks_x += 1
-                    else:
-                        pass
-        print("available block pose dictionary: {}".format(self._available_block_pose_dic))
-
-        # generate object/pose inverse mapping
-        for block, pose in self._available_block_pose_dic.items():
-            self._available_block_pose_inverse[str(pose)] = block
-
-        # map the object pose in block space to cartesian space
-        for block in self._available_cartesian_pose_dic.keys():
-            self._pose_mapping[str(self._available_block_pose_dic[block])] = self._available_grasp_pose_dic[block]
-        print("available grasp pose mapping: {}".format(self._pose_mapping))
-
-    # construct pose transformation of all objects for goal state (and temperary pose), call only once
-    def goal_pose_transformation(self):
-        blocks_x = self._n_blocks
-        # construct 2d pose for target object cartesian pose
-        sorted_goal_cartesian_pose_list = sorted(self._goal_cartesian_pose_dic.items(), key=lambda obj: obj[1].position.z)
+    
+    def search_strings(self, string_list, searchable):
+        '''
+        Searches for a substring in a given list of strings
         
-        print('sorted goal cartesian pose list: {}'.format(sorted_goal_cartesian_pose_list))
-        for i in range(len(sorted_goal_cartesian_pose_list)):
-            if i == 0:
-                self._goal_block_pose_dic[sorted_goal_cartesian_pose_list[0][0]] = np.array([blocks_x, 0])
-                blocks_x += 1
-            else:
-                for j in range(i):
-                    if self.is_stacked(sorted_goal_cartesian_pose_list[j][1], sorted_goal_cartesian_pose_list[i][1]):
-                        x, y = self._goal_block_pose_dic[sorted_goal_cartesian_pose_list[j][0]]
-                        y += 1
-                        self._goal_block_pose_dic[sorted_goal_cartesian_pose_list[i][0]] = np.array([x, y])
-                    elif j == (i - 1):
-                        self._goal_block_pose_dic[sorted_goal_cartesian_pose_list[i][0]] = np.array([blocks_x, 0])
-                        blocks_x += 1
+        Input: 
+        string_list: str (list of strings to be searched in)
+        searchable: str (substring to search for)
+        
+        Return:
+        Bool: True/False
+        '''
+        return any([searchable in x for x in string_list])
+    
+    def find_target_black_node(self, pose):
+        '''
+        Given a pose, find the black node that is associated with it
+        '''
+        for node in self.black_nodes:
+            if node.pose == pose:
+                return node
+    
+    def initialize_target_black_nodes(self, object_name_list):
+        '''
+        Creates nodes for target poses. Includes the pose information in each of these black nodes
+        
+        Returns:
+        A list of black nodes, each containing a target pose
+        '''
+        black_nodes = []
+        for object_name in object_name_list:
+            bnode = RedBlackNode(name=object_name, node_type='b')
+            bnode.pose = self.object_goal_pose_dict[bnode.object]
+            black_nodes.append(bnode)
+        return black_nodes
+    
+    def initialize_initial_red_nodes(self, object_name_list):
+        '''
+        Initializes the red nodes but does not add any pose information (as it is not collected yet)
+        
+        Returns:
+        A list of red nodes (without pose information)
+        '''
+        red_nodes = []
+        for object_name in object_name_list:
+            rnode = RedBlackNode(name=object_name, node_type='r')
+            rnode.target_black = [self.find_target_black_node(self.object_goal_pose_dict[rnode.object])]
+            red_nodes.append(rnode)
+        return red_nodes
+
+
+    def update_red_nodes(self, detected_object_label_list):
+        '''
+        Here, we assume that object initial and grasp poses are provided to us. We add this information to the nodes
+        
+        Returns:
+        None
+        '''
+        for node in self.red_nodes:
+            if node.object in detected_object_label_list:
+                print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
+                if node.done == True or node.type == 'b':
+                    continue
+                node.pickable = True
+                node.pose = self.object_init_pose_dict[node.object]
+                node.pick_grasp_pose = self.object_pick_grasp_pose_dict[node.object]
+                node.place_grasp_pose = self.object_place_grasp_pose_dict[node.object]
+
+    def update_black_nodes(self, scene_point_cloud = [], occ_map = []):
+        '''
+        Currently, this function checks if a particular place is occupied or not and assigns occupancy statuses 
+        to the black nodes (target pose nodes). 
+        
+        Stacking information: TO BE ADDED IN FUTURE (USING SCENE GRAPHS OR RELATED METHODS)
+        
+        Parameters:
+        1. scene_point_cloud: PCD obtained from kinect/realsense
+        
+        Returns:
+        None
+        '''
+        # 1. Get occupancy map
+        if len(occ_map) == 0:
+            print("Occupancy map building ...")
+            occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(scene_point_cloud.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
+            print("Occupancy map build!")
+        else:
+            print("Occupancy map recieved!")
+        # 2. Get path to materials
+        rospack = rospkg.RosPack()
+        materials_path = rospack.get_path('ocrtoc_materials')
+        print("Rospack path: {}*********************++++++++++++++++++++++++++++*************************+++++++++++++++++++++++++++".format(materials_path))
+        # 3. Generate occupancy maps for each of the objects and compare the two maps. 
+        #    If both the maps have entry '1' at any particular pixel, then the place is said to be occupied
+        # FUTURE: ADD TOLERANCE (Concept: It is okay to have few pixels occupied, as long as it is not too many (set some threshold))
+        pcds = []
+        for bnode in self.black_nodes:
+            if bnode.object in self.object_goal_pose_dict:
+                temp = bnode.object.split('_')
+                model_name = ''
+                for i in range(len(temp)-1):
+                    if i==0:
+                        model_name = model_name + temp[i]
                     else:
-                        pass
-        print("goal block pose dictionary: {}".format(self._goal_block_pose_dic))
+                        model_name = model_name + '_' + temp[i]
+                path_to_object_mesh = os.path.join(materials_path, 'models/{}/textured.obj'.format(model_name)) # visual.ply
+                # Reading textured mesh and transforming it to the actual goal pose
+                mesh = o3d.io.read_triangle_mesh(path_to_object_mesh)
+                pose = self.object_goal_pose_dict[bnode.object]
+                translation = np.array([pose.position.x, pose.position.y, pose.position.z]) - np.array(mesh.get_center())
+                orientation = (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z)
+                mesh.rotate(mesh.get_rotation_matrix_from_quaternion(orientation)) # center = True by default (implies rotation is applied w.r.t the center of the object)
+                mesh.translate((translation[0], translation[1], translation[2])) 
+                pcd =  mesh.sample_points_poisson_disk(1000, init_factor=5, pcl=None)
+                occ1 = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120, dir_path='/root/occ_map_{model_name}.png')
+                
+                amount_required_occ1 = np.sum(occ1)
+                # Check if occupied
+                amount_occupied = np.sum(np.logical_and(occ_map, occ1))
+                occ_perc = 100*float(amount_occupied)/float(amount_required_occ1)
+                if occ_perc > 5:
+                    bnode.occupied = True
+                else:
+                    bnode.occupied = False
+                # is_occupied = np.any(np.logical_and(occ_map, occ1))
+                # bnode.occupied = is_occupied
+                print("{} percentage of {}'s target pose is occupied".format(occ_perc, bnode.object))
+                print("So, occupied = {}".format(bnode.occupied))
+                # pcds.append(pcd)
+        # o3d.visualization.draw_geometries(pcds)
+        # exit(1)
+        
+        
+    def get_color_image_frame_id(self):
+        '''Realsense topic'''
+        return self.camera_interface.get_ros_image(self.color_topic_name).header.frame_id
+    
+    def get_points_frame_id(self):
+        '''Realsense topic'''
+        return self.camera_interface.get_ros_points(self.points_topic_name).header.frame_id
+    
+    def get_kinect_color_image_frame_id(self):
+        '''Kinect camera'''
+        return self.camera_interface.get_ros_image(self.kinect_color_topic_name).header.frame_id
 
-        # construct 2d pose temporary cartesian pose
-        self._temp_block_poses = [np.array([blocks_x + x, 0]) for x in range(len(self._temp_cartesian_poses))]
-        str_temp_pose = []
-        for temp_pose in self._temp_block_poses:
-            str_temp_pose.append(str(temp_pose))
-        if len(str_temp_pose) > 0:
-            self._pose_mapping.update(dict(zip(str_temp_pose, self._temp_cartesian_poses)))
+    def get_kinect_depth_image_frame_id(self):
+        '''Kinect camera'''
+        return self.camera_interface.get_ros_image(self.kinect_depth_topic_name).header.frame_id
 
-    # map the object pose in block space to grasp space
-    def target_grasp_pose_transformation(self):
-        for block in self._available_grasp_pose_dic.keys():
-            self._pose_mapping[str(self._goal_block_pose_dic[block])] = self._target_grasp_pose_dic[block]
-        print('whole pose mapping:{}'.format(self._pose_mapping))
+    def get_kinect_points_frame_id(self):
+        '''Kinect camera'''
+        return self.camera_interface.get_ros_points(self.kinect_points_topic_name).header.frame_id
+    
+    def get_kinect_points_transform_matrix(self):
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.kinect_points_transform_to_frame)
+    
+    def get_kinect_color_transform_matrix(self):
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.kinect_color_transform_to_frame)
+    
+    def kinect_get_pcd(self, use_graspnet_camera_frame = False):
+        return self.camera_interface.get_o3d_pcd(self.kinect_points_topic_name)
+    
+    def kinect_process_pcd(self, pcd, reconstruction_config):
+        points, colors = self.o3dp.pcd2array(pcd)
+        mask = points[:, 2] > reconstruction_config['z_min']
+        mask = mask & (points[:, 2] < reconstruction_config['z_max'])
+        mask = mask & (points[:, 0] > reconstruction_config['x_min'])
+        mask = mask & (points[:, 0] < reconstruction_config['x_max'])
+        mask = mask & (points[:, 1] < reconstruction_config['y_max'])
+        mask = mask & (points[:, 1] > reconstruction_config['y_min'])
+        pcd = self.o3dp.array2pcd(points[mask], colors[mask])
+        return pcd.voxel_down_sample(reconstruction_config['voxel_size'])
+    
+    def capture_pcd(self, use_camera='kinect'):
+        t1 = time.time()
+        pcds = []
+        color_images = []
+        camera_poses = []
+        # capture images by realsense. The camera will be moved to different locations.
+        if use_camera == 'kinect': # in ['kinect', 'both']:
+            points_trans_matrix = self.get_kinect_points_transform_matrix()
+            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
+            full_pcd_kinect.transform(points_trans_matrix)
+            full_pcd_kinect = self.kinect_process_pcd(full_pcd_kinect, self.reconstruction_config)
+                # pcds.append(full_pcd_kinect)
+                # kinect_image = self.get_kinect_image()
+                # kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGBA2RGB)
+                # kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR)
+                # if self.debug_kinect:
+                #     cv2.imshow('color', cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR))
+                #     cv2.waitKey(0)
+                #     cv2.destroyAllWindows()
+                # color_images.append(kinect_image)
 
+                # if self.debug:
+                #     print('points_trans_matrix:', points_trans_matrix)
+                # camera_poses.append(self.get_kinect_color_transform_matrix())
+            return full_pcd_kinect
+        elif use_camera == 'realsense':
+            print("Try with Kinect please, Realsense is not ready yet;( ******++++++++++++***********")
+        
+    def get_point_cloud_from_kinect(self):
+        '''
+        Capture and get point cloud from Kinect camera (Will be used to build occupancy map)
+        '''
+        pcd_kinect = self.capture_pcd(use_camera='kinect')
+        # import open3d as o3d
+        # o3d.visualization.draw_geometries([pcd_kinect])
+        return pcd_kinect
+        
+        
+        
     # get poses of part of objects each call of perception node, call perception node and plan task several times
     def cycle_plan_all(self):
         """Plan object operation sequence and execute operations recurrently.
 
-        logical process:
-        1 get all objects goal poses
-        2 get current objects poses
-        # 3 compare current objects poses and goal poses
-        4 plan task sequence of current relative objects
-        5 task execution
-        6 delete already planned objects from goal objects list and check goal objects list is empty
-        7 if goal objects list is empty, stop planning, otherwise, go to step 2
+        Process:
+        1. Get target poses
+        2. Get current poses from perception node for remaining objects
+        3. Build a graph if it does not exist. Otherwise, update it with the new info on current poses
+        4. Solve the graph - Real time task planning and execution 
+        5. Go back to step 1 if all objects are not picked and placed yet
         """
 
-        print("enter cycle_plan_all function")
-        # transform goal cartesian pose to 2d space
-        self.goal_pose_transformation()
-
-        # TODO check task result???
-        left_object_dic = self._goal_block_pose_dic
-        self.left_object_dic = left_object_dic
-        
-        if self.search_strings(left_object_dic.keys(), searchable='clear_box'):
+        print("Cycle plan function started executing!")
+        left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
+        if self.search_strings(left_object_labels, searchable='clear_box'):
             self.clear_box_flag = True
             print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
-        
-        while len(left_object_dic) != 0:
-            # get left objects information
-            rospy.loginfo('Try to get information of left objects from perception node')
-            self._completed_objects = []
-            self.get_pose_perception(left_object_dic.keys())  # get pose from perception
-            # self.get_fake_pose_perception(left_object_dic.keys())  # get pose from simulation environment
             
-            if len(left_object_dic) > len(self.left_object_dic):
-                left_object_dic = self.left_object_dic
-
-            # if no availabe object information get, call perception node again until the number of repeat call reach max_repeat_call
-            if len(self._available_cartesian_pose_dic) == 0:
-                rospy.loginfo('Nothing get from perception, but the information of the following objects have never been gotten. Call perpectp again 3 seconds later')
-                print('left objects: {}'.format(left_object_dic.keys()))
-                rospy.sleep(3.0)
-                self._n_repeat_call += 1
-                if self._n_repeat_call >= self._max_repeat_call:
-                    rospy.loginfo('Call perception node' + str(self._max_repeat_call) + 'times, but nothing get')
-                    rospy.loginfo('Task failed, Information of the following objects can not be obtained: ')
-                    print(left_object_dic.keys())
-                    break
-                else:
+        # 1. Create black nodes for target poses
+        self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
+        # 2. Create red nodes for initial poses
+        self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
+            
+        count = 3
+        while len(left_object_labels) > 0 and count > 0:
+            count -= 1
+            # 3. Get information about left objects from perception node
+            rospy.loginfo('Try to get information of left objects from perception node')
+            self.get_pose_perception(left_object_labels)
+            print("Detected object list: {}".format(self.detected_object_label_list))
+            
+            # 4. Update red node info
+            self.update_red_nodes(self.detected_object_label_list)
+            
+            # 5. Get point cloud from kinect and build an occupancy grid
+            # current_pcd = self.get_point_cloud_from_kinect()
+            # print("Total number of points in pcd: {}".format(len(current_pcd.points)))
+            # occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
+            # self.update_black_nodes(current_pcd, occ_map)
+            # prospective_pcd = self.construct_pcd_of_targets()
+            # 6. Start task plan
+            completed_objects = self.solve()
+            # self.solve(occ_map=occ_map)
+            
+            # 7. Remove completed objects
+            temp = []
+            for object in left_object_labels:
+                if object in completed_objects:
                     continue
-
-            # compare goal objects and currently available objects
-            self._target_cartesian_pose_dic.clear()
-            self._target_block_pose_dic.clear()
-            for block in self._blocks:
-                print('Available Cartesian Pose Dic: {} and checking for block {}'.format(self._available_cartesian_pose_dic.keys(), block))
-                if block in self._available_cartesian_pose_dic.keys():
-                    self._target_cartesian_pose_dic[block] = self._goal_cartesian_pose_dic[block]
-                    self._target_block_pose_dic[block] = self._goal_block_pose_dic[block]
+                temp.append(object)
+            left_object_labels = temp
+            print("left objects: {}".format(left_object_labels))
+            
+            
+            
+    def find_red_node(self, node_list):
+        for node in node_list:
+            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.target_black[0].occupied == False and node.pickable==True:
+                if node.target_black[0].prev_node_in_stack == None:
+                    # print("yes {}".format(node.name))
+                    return node
                 else:
-                    pass
+                    if node.target_black[0].prev_node_in_stack.done == True:
+                        return node
+        return None
 
-            # transform available cartesian pose to 2d space
-            self.available_pose_transformation()
+    def just_find_red(self, node_list):
+        for node in node_list:
+            if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True:
+                return node
+        return None
 
-            # get target grasp pose to 2d space
-            self.target_grasp_pose_transformation()
+    def solve(self, occ_map = []):
+        '''Solver
+        Somewhat DFS
+        '''
+        # dfs 
+        completed_objects = []
+        if len(occ_map) == 0:
+            print("No occupancy map recieved, no buffer spots will be generated")
+        sequence = []
+        done = False
+        nodes = self.red_nodes
+        # head = self.find_red_node(nodes)
+        counter = 3
+        while (not done) and counter > 0:
+            current_pcd = self.get_point_cloud_from_kinect()
+            print("Total number of points in pcd: {}".format(len(current_pcd.points)))
+            occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
+            self.update_black_nodes(current_pcd, occ_map)
+            
+            head = self.find_red_node(nodes)
+            
+            if head == None:
+                if len(occ_map) == 0:
+                    done = True
+                    continue
+                head = self.just_find_red(nodes)
+                if head == None:
+                    done = True
+                    continue
+                buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
+                buffer.occupied = copy.deepcopy(head.occupied)
+                buffer.target_black = [head.target_black[0]]
+                buffer.done = False
+                # buffer.attached_red_nodes= head.attached_red_nodes
+                head.done = True
+                head.type = 'b'
+                print(occ_map)
+                target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y])
+                buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
+                buffer_pose = copy.deepcopy(self.object_init_pose_dict[head.object])
+                buffer_pose.position.x = buffer_spot_2d[0]
+                buffer_pose.position.y = buffer_spot_2d[1]
+                buffer.pickable = False
+                
+                # Pick and place in buffer
+                print("Generated buffer. Now, pick and place the object in buffer spot!")
+                res = self.go_pick_object(object_name=head.object)
+                # if res == True:
+                self.go_place_object(object_name=head.object, final_place_pose=buffer_pose)
+                print("Placed in buffer!")
+                # import time
+                # time.sleep(1)
+                # rospy.sleep(1)
+                
+                sequence.append(head.name)
+                sequence.append(buffer.name)
+                buffer.prev_node_in_stack = head.prev_node_in_stack
+                buffer.next_node_in_stack = head.next_node_in_stack
+                if head.next_node_in_stack != None:
+                    head.next_node_in_stack.prev_node_in_stack = buffer
+                if head.prev_node_in_stack != None:
+                    head.prev_node_in_stack.next_node_in_stack = buffer
 
-            # task planning and execution
-            self.target_objects_task_planning()
+                # head = self.find_red_node(nodes)
+                nodes.append(buffer)
+                # self.red_nodes.append(buffer)
+                # nodes_labelled.append((buffer, 0))
+                print("*************************++++++++**************************\nSequence: {}".format(sequence))
+                # counter -= 1
+                continue
+            # print("Node: {}".format(head.name))
+            # Find an undone red
+            print("Picking and placing in target pose (since target pose is empty!)")
+            self.go_pick_object(object_name=head.object)
+            self.go_place_object(object_name=head.object)
+            print("Placed in target pose!")
+            sequence.append(head.name)
+            sequence.append(head.target_black[0].name)
+            head.type = 'b'
+            head.done = True
+            head.target_black[0].done = True
+            
+            completed_objects.append(head.object)
+            # head = self.find_red_node(nodes)
+            # if head == None:
+            #     done = True
+            print("Sequence: {}".format(sequence))
+            # counter -= 1
+            
+        print('Sequence: {}'.format(sequence))  
+        print("Completed objects: {}".format(completed_objects))
+        print(" red nodes: {}".format(self.red_nodes))
+        print("Nodes: {}".format(nodes))
+        return completed_objects
 
-            # delete completed task, update left objects list
-            # for block in self._target_cartesian_pose_dic.keys():
-            #     del left_object_dic[block]
-            print("completed objects", self._completed_objects)
-            for block in self._completed_objects:
-                del left_object_dic[block]
+    def go_pick_object(self, object_name):
+        '''
+        This function assumes that the arm is in it's rest pose. It first moves to pre-pick waypoint directly above the pick 
+        pose. Then goes to pick pose and picks the object. 
 
-            print('left objects: {}'.format(left_object_dic))
+        Returns:
+        is_picked: boolean - If true, the object is successfully held in the arm, and we can proceed to place pose. Otherwise, go to next object.
+        '''
+        is_picked=False
+        # 1. Go to pick pose
+        pick_grasp_pose = self.object_pick_grasp_pose_dict[object_name]
+        print("pick grasp pose")
+        orientation_q = pick_grasp_pose.orientation
+        orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
+        (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
+        print((roll, pitch, yaw))  
+        if abs(yaw) > abs(np.deg2rad(135)) and abs(yaw) < abs(np.deg2rad(225)):
+            yaw = yaw + np.pi
+        orientation_q = quaternion_from_euler(roll, pitch, yaw)
+        pick_grasp_pose.orientation = Quaternion(*orientation_q)                                                                             
+        plan_result = self._motion_planner.move_cartesian_space_upright(pick_grasp_pose, via_up=True, last_gripper_action='place')
+        
+        if plan_result == False:
+            return is_picked
+        
+        # 2. Now pick the object up
+        self._motion_planner.pick()
+        
+        # 3. Check if the object is grapsed
+        is_picked = self.gripper_width_test()
+        return is_picked
+        
+        
+        
+    def go_place_object(self, object_name, final_place_pose = None):
+        '''
+        This function assumes that the arm is in it's pick pose. It first moves to pre-place waypoint directly above the place 
+        pose. Then drop the object 
 
-    # task planning and execution of objects that are currently available and in the list of goal objects
-    def target_objects_task_planning(self):
-        problem_fn = get_shift_all_problem
-        task_planning_problem = problem_fn(self._available_block_pose_dic, self._target_block_pose_dic, self._temp_block_poses)
-        print('====================task planning problem:====================')
-        print(task_planning_problem)
-        print('==============================================================')
-
-        stream_info = {
-            'test-cfree': StreamInfo(negate=True),
-        }
-
-        pddlstream_problem = self.pddlstream_from_tamp(task_planning_problem)
-        print('==========================algorithm===========================')
-        if self._algorithm_arc == 'focused':
-            solution = solve_focused(pddlstream_problem, unit_costs=self._unit_arc, stream_info=stream_info, debug=False)
-        elif self._algorithm_arc == 'incremental':
-            solution = solve_incremental(pddlstream_problem, unit_costs=self._unit_arc,
-                                         complexity_step=INF)
+        Returns:
+        is_placed: boolean - If true, the object is successfully placed
+        '''
+        
+        is_placed = False
+        # 1. First go to the place pose
+        grasp_pose = None
+        if final_place_pose != None:
+            grasp_pose = self.get_target_grasp_pose2(self.object_init_pose_dict[object_name], self.object_pick_grasp_pose_dict[object_name], final_place_pose)
         else:
-            raise ValueError(self._algorithm_arc)
-        print('==============================================================')
-
-        print('========================printSolution=========================')
-        print_solution(solution)
-        print('==============================================================')
-        plan, cost, evaluations = solution
-        if plan is None:
-            return
-        print('=========================apply_plan===========================')
-        self.apply_plan(task_planning_problem, plan)
-        print('==============================================================')
-
-    def once_plan_all(self):
-        print("enter once_plan_all function")
-
-        # get all pose information in simulation environment
-        self.get_pose_perception(self._blocks)
-
-        # transpose initial and target pose of all objects to 2d space
-        self.goal_pose_transformation()
-        self.available_pose_transformation()
-
-        problem_fn = get_shift_all_problem  # get_shift_one_problem | get_shift_all_problem
-        tamp_problem = problem_fn(self._available_block_pose_dic, self._goal_block_pose_dic, self._temp_block_poses)
-        print('====================tamp_problem:====================')
-        print(tamp_problem)
-        print('=====================================================')
-
-        stream_info = {
-            'test-cfree': StreamInfo(negate=True),
-        }
-
-        pddlstream_problem = self.pddlstream_from_tamp(tamp_problem)
-        print('====================algorithm=====================')
-        if self._algorithm_arc == 'focused':
-            solution = solve_focused(pddlstream_problem, unit_costs=self._unit_arc, stream_info=stream_info, debug=False)
-        elif self._algorithm_arc == 'incremental':
-            solution = solve_incremental(pddlstream_problem, unit_costs=self._unit_arc,
-                                         complexity_step=INF)  # max_complexity=0)
-        else:
-            raise ValueError(self._algorithm_arc)
-        print('==================================================')
-
-        print('====================printSolution=====================')
-        print_solution(solution)
-        print('======================================================')
-        plan, cost, evaluations = solution
-        if plan is None:
-            return
-        print('====================apply_plan=====================')
-        self.apply_plan(tamp_problem, plan)
-        print('===================================================')
-
-    def pddlstream_from_tamp(self, tamp_problem):
-        initial = tamp_problem.initial
-        assert (initial.holding is None)
-
-        known_poses = list(initial.block_poses.values()) + list(tamp_problem.goal_poses.values())
-
-        directory = os.path.dirname(os.path.abspath(__file__))
-        domain_pddl = read(os.path.join(directory, 'domain.pddl'))
-        stream_pddl = read(os.path.join(directory, 'stream.pddl'))
-
-        q100 = np.array([100, 100])
-        constant_map = {
-            'q100': q100,  # As an example
-        }
-
-        init = [
-                   ('CanMove',),
-                   ('Conf', q100),
-                   ('Conf', initial.conf),
-                   ('AtConf', initial.conf),
-                   ('HandEmpty',),
-                   Equal((TOTAL_COST,), 0)] + \
-               [('Block', b) for b in initial.block_poses.keys()] + \
-               [('Pose', p) for p in known_poses] + \
-               [('AtPose', b, p) for b, p in initial.block_poses.items()]
-        # [('Pose', p) for p in known_poses + tamp_problem.poses] + \
-
-        goal = And(*[
-            ('AtPose', b, p) for b, p in tamp_problem.goal_poses.items()
-        ])
-
-        # TODO: convert to lower case
-        stream_map = {
-            # 'sample-pose': from_gen_fn(lambda: ((np.array([x, 0]),) for x in range(len(poses), n_poses))),
-            'sample-pose': from_gen_fn(lambda: ((p,) for p in tamp_problem.poses)),
-            'inverse-kinematics': from_fn(lambda p: (p + GRASP,)),
-            'test-cfree': from_test(lambda *args: not collision_test(*args)),
-            'collision': collision_test,
-            'distance': distance_fn,
-            'test-ontop': self.is_ontop(lambda *args: self.ontop_test(*args)),
-        }
-
-        return domain_pddl, constant_map, stream_pddl, stream_map, init, goal
-
-    def ontop_test(self, *args):
-        # print("ontop_test args: {}".format(args))
-        # x, y = args
-        # if y < 0:
-        #     return True  # to handle the initial configuration of gripper [0, -1] in 2d space
-        # y += 1
-        # up = np.array([x, y])
-        return True
-
-    def is_ontop(self, test):
-        print('on top function')
-        return from_fn(lambda *args, **kwargs: outputs_from_boolean(test(*args, **kwargs)))
+            grasp_pose = self.object_place_grasp_pose_dict[object_name]
+                # plan_result = self._motion_planner.move_cartesian_space(grasp_pose)  # move in cartesian straight path
+                # plan_result = self._motion_planner.move_cartesian_space_discrete(grasp_pose)  # move in cartesian discrete path
+                
+        print("in place")
+        print('$'*80) 
+        print(" grasp pose is")
+        print(grasp_pose)
+                
+        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+                
+        plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action='pick')
+        rospy.sleep(1.0)
+        
+        is_placed = plan_result
+        
+        # 2. Place the object
+        self._motion_planner.place()
+        
+        return is_placed
 
     def draw_state(self, viewer, state, colors):
         print("enter draw state function")
@@ -631,19 +993,6 @@ class TaskPlanner(object):
             pose = state.conf - GRASP
             r, c = pose[::-1]
             viewer.draw_block(r, c, name=state.holding, color=colors[state.holding])
-
-    def search_strings(self, string_list, searchable):
-        '''
-        Searches for a substring in a given list of strings
-        
-        Input: 
-        string_list: str (list of strings to be searched in)
-        searchable: str (substring to search for)
-        
-        Return:
-        Bool: True/False
-        '''
-        return any([searchable in x for x in string_list])
 
     # mapping move action in 2d space to cartesian space
     def mapping_move(self, str_pose):

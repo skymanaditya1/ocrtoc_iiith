@@ -320,22 +320,22 @@ class Perceptor():
         return object_poses
 
     def compute_grasp_pose(self, full_pcd):
-        return self.compute_grasp_poses2(full_pcd)
-        # points, _ = o3dp.pcd2array(full_pcd)
-        # grasp_pcd = copy.deepcopy(full_pcd)
-        # grasp_pcd.points = o3d.utility.Vector3dVector(-points)
+        # return self.compute_grasp_poses2(full_pcd)
+        points, _ = o3dp.pcd2array(full_pcd)
+        grasp_pcd = copy.deepcopy(full_pcd)
+        grasp_pcd.points = o3d.utility.Vector3dVector(-points)
 
-        # # generating grasp poses.
-        # gg = self.graspnet_baseline.inference(grasp_pcd)
-        # gg.translations = -gg.translations
-        # gg.rotation_matrices = -gg.rotation_matrices
-        # gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
-        # gg = self.graspnet_baseline.collision_detection(gg, points)
+        # generating grasp poses.
+        gg = self.graspnet_baseline.inference(grasp_pcd)
+        gg.translations = -gg.translations
+        gg.rotation_matrices = -gg.rotation_matrices
+        gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
+        gg = self.graspnet_baseline.collision_detection(gg, points)
         
-        # print("Here are the grasp poses from the baseline {}".format(gg))
+        print("Here are the grasp poses from the baseline {}".format(gg))
 
-        # # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
-        # return gg
+        # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
+        return gg
     
     def compute_grasp_poses2(self, full_pcd):
         '''
@@ -696,15 +696,16 @@ class Perceptor():
 
         o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
         # full_pcd = o3d.io.read_point_cloud("/root/ocrtoc_ws/src/test.pcd")
-        gg, t = self.compute_grasp_pose(full_pcd)
+        gg = self.compute_grasp_pose(full_pcd)
         if self.debug_pointcloud:
-            print('g pose from the return function {}'.format(t))
+            # print('g pose from the return function {}'.format(t))
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-            frame_grasp_pose.transform(t)
+            # frame_grasp_pose.transform(t)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
 
         # Computer Object 6d Poses
+        print("Object list in perceptor: {}".format(object_list))
         object_poses = self.compute_6d_pose(
             full_pcd = full_pcd,
             color_images = color_images,
