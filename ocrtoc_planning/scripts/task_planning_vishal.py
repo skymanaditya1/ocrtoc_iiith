@@ -1,8 +1,11 @@
-'''ORTOOLS based Task planner
-Uses OR-Tools to find a an optimal task plan 
+'''Heuristic Graph-based planner
+This graph based planner handles final scene stacking and replacement scenarios very robustly
 
 Team RRC
 Author: Vishal Reddy Mandadi
+
+Assumptions:
+1. We get the semantic information about stacking from scene graph generators or related methods
 '''
 
 from __future__ import print_function
@@ -42,10 +45,6 @@ import open3d as o3d
 from ocrtoc_common.camera_interface import CameraInterface
 # from ocrtoc_common.transform_interface import TransformInterface
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
-
-# ORTOOLS imports
-from ortools.constraint_solver import routing_enums_pb2
-from ortools.constraint_solver import pywrapcp
 
 
 # Miscellineous functions class - contains functions from https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py 
@@ -743,130 +742,7 @@ class TaskPlanner(object):
         # o3d.visualization.draw_geometries([pcd_kinect])
         return pcd_kinect
         
-    def create_data_model(self, nodes):
-        """Stores the data for the problem."""
-        data = {}
-        from scipy.spatial import distance_matrix
-
-        #nodes = [[0, 0], [41, 44], [2, 1], [27, 5], [3, 49], [20, 4], [18, 4], [39, 44], [23, 12]] # 2431
-        #nodes = [[0, 0], [23, 28], [34, 28], [42, 46], [11, 44], [19, 25], [36, 27], [0, 25], [7, 38]] # 4123
-        #nodes = [[6, 6], [16, 27], [14, 2], [24, 45], [6, 14], [49, 27], [44, 0], [17, 11], [36, 17]] # 4132
-        #nodes = [[0, 0], [43, 19], [18, 47], [41, 38], [50, 16], [45, 12], [32, 17], [4, 5], [43, 32]] # 2143
-        #nodes = [[6, 6], [11, 47], [27, 4], [5, 48], [21, 34], [26, 19], [37, 10], [8, 37], [29, 9]] # 3142
-        # nodes = [[0, 0], [31, 34], [19, 27], [9, 19], [12, 34], [43, 32], [5, 26], [17, 25], [46, 43]] # 2301 Working default
-        #nodes = [[9, 1], [22, 29], [49, 35], [20, 19], [8, 13], [8, 13], [16, 18], [13, 11]] # 1432
-        # Trying 3D nodes
-        # nodes = [[0, 0, 0], [31, 34, 31], [19, 27, 1], [9, 19, 5], [12, 34, 10], [43, 32, 38], [5, 26, 65], [17, 25, 20], [46, 43, 90] ]
-
-        dm = distance_matrix(nodes, nodes)
-
-        data['distance_matrix'] = dm
-        data['pickups_deliveries'] = [
-            [1, 5],
-            [2, 6],
-            [3, 7],
-            [4, 8]
-        ]
-        data['num_vehicles'] = 1
-        data['depot'] = 0
         
-        data['demands'] = [0, 1, 1, 1, 1, -1, -1, -1, -1] # [1, 1, 1, 1, -1, -1, -1, -1]
-        data['vehicle_capacities'] = [1]
-        return data
-
-    def print_solution(self, data, manager, routing, solution):
-        """Prints solution on console."""
-        import time
-        t = time.time()
-        total_distance = 0
-        for vehicle_id in range(data['num_vehicles']):
-            index = routing.Start(vehicle_id)
-            plan_output = 'Route for vehicle {}:\n'.format(vehicle_id)
-            route_distance = 0
-            while not routing.IsEnd(index):
-                plan_output += ' {} -> '.format(manager.IndexToNode(index))
-                previous_index = index
-                index = solution.Value(routing.NextVar(index))
-                route_distance += routing.GetArcCostForVehicle(
-                    previous_index, index, vehicle_id)
-            plan_output += '{}\n'.format(manager.IndexToNode(index))
-            plan_output += 'Distance of the route: {}m\n'.format(route_distance)
-            print(plan_output)
-            total_distance += route_distance
-        print("total time taken:", time.time()-t)
-        print('Total Distance of all routes: {}m'.format(total_distance))
-
-    def solve_orTools(self, data):
-        # Create the routing index manager.
-        manager = pywrapcp.RoutingIndexManager(len(data['distance_matrix']),
-                                            data['num_vehicles'], data['depot'])
-
-        # Create Routing Model.
-        routing = pywrapcp.RoutingModel(manager)
-
-        def demand_callback(from_index):
-            """Returns the demand of the node."""
-            # Convert from routing variable Index to demands NodeIndex.
-            from_node = manager.IndexToNode(from_index)
-            return data['demands'][from_node]
-
-        # Define cost of each arc.
-        def distance_callback(from_index, to_index):
-            """Returns the manhattan distance between the two nodes."""
-            # Convert from routing variable Index to distance matrix NodeIndex.
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return data['distance_matrix'][from_node][to_node]
-
-        demand_callback_index = routing.RegisterUnaryTransitCallback(
-            demand_callback)
-        routing.AddDimensionWithVehicleCapacity(
-            demand_callback_index,
-            2,  # null capacity slack
-            data['vehicle_capacities'],  # vehicle maximum capacities
-            True,  # start cumul to zero
-            'Capacity')
-
-
-        transit_callback_index = routing.RegisterTransitCallback(distance_callback)
-        routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
-
-        # Add Distance constraint.
-        dimension_name = 'Distance'
-        routing.AddDimension(
-            transit_callback_index,
-            0,  # no slack
-            10000,  # vehicle maximum travel distance
-            True,  # start cumul to zero
-            dimension_name)
-        distance_dimension = routing.GetDimensionOrDie(dimension_name)
-        distance_dimension.SetGlobalSpanCostCoefficient(100)
-
-        # Define Transportation Requests.
-        for request in data['pickups_deliveries']:
-            pickup_index = manager.NodeToIndex(request[0])
-            delivery_index = manager.NodeToIndex(request[1])
-            routing.AddPickupAndDelivery(pickup_index, delivery_index)
-            routing.solver().Add(
-                routing.VehicleVar(pickup_index) == routing.VehicleVar(
-                    delivery_index))
-            routing.solver().Add(
-                distance_dimension.CumulVar(pickup_index) <=
-                distance_dimension.CumulVar(delivery_index))
-
-        # Setting first solution heuristic.
-        search_parameters = pywrapcp.DefaultRoutingSearchParameters()
-        search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC)
-
-        # Solve the problem.
-        solution = routing.SolveWithParameters(search_parameters)
-
-        # Print solution on console.
-        if solution:
-            print("Solution found!!")
-            self.print_solution(data, manager, routing, solution)
-        print("Solution: {}".format(solution))
         
     # get poses of part of objects each call of perception node, call perception node and plan task several times
     def cycle_plan_all(self):
@@ -887,76 +763,17 @@ class TaskPlanner(object):
             print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             
         # 1. Create black nodes for target poses
-        # self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
+        self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
         # 2. Create red nodes for initial poses
-        # self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
+        self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
             
-        count = 5
+        count = 3
         while len(left_object_labels) > 0 and count > 0:
             count -= 1
             # 3. Get information about left objects from perception node
             rospy.loginfo('Try to get information of left objects from perception node')
             self.get_pose_perception(left_object_labels)
             print("Detected object list: {}".format(self.detected_object_label_list))
-
-            # 4. Create pick and place grasp pose lists and final list of nodes
-            rest_pose = Pose()
-        
-            rest_pose.position.x = -0.112957249941
-            rest_pose.position.y = 2.9801544038e-05
-            rest_pose.position.z = 0.590340135745
-            rest_pose.orientation.x = -0.923949504923
-            rest_pose.orientation.y = 0.382514458771
-            rest_pose.orientation.z = -3.05585242637e-05
-            rest_pose.orientation.w = 1.57706453844e-05
-
-            pick_list = []
-            place_list = []
-            action_sequence_mapping = {}
-            action_sequence_mapping['0'] = {
-                'name': "rest_pose",
-                'object': "none",
-                'pose': rest_pose
-            }
-            n_detected_objects = len(self.detected_object_label_list)
-
-            # nodes = []
-
-            for lab_index, label in self.detected_object_label_list:
-                print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
-                # node.pickable = True
-                pose_cartesian = self.object_init_pose_dict[label].position
-                pick_grasp_cartesian = self.object_pick_grasp_pose_dict[label].position
-                place_grasp_cartesian = self.object_place_grasp_pose_dict[label].position
-                pick_list.append([pick_grasp_cartesian.x, pick_grasp_cartesian.y, pick_grasp_cartesian.z])
-                place_list.append([place_grasp_cartesian.x, place_grasp_cartesian.y, place_grasp_cartesian.z])
-                action_sequence_mapping[str(lab_index+1)]={'name': "{}_pick".format(label),
-                                                            'object': label,
-                                                            'pose': self.object_pick_grasp_pose_dict[label]}
-                action_sequence_mapping[str(n_detected_objects + lab_index + 1)] = {'name': "{}_place".format(label),
-                                                                                        'object': label,
-                                                                                        'pose': self.object_place_grasp_pose_dict[label]}
-            
-            # 5. Create a list a nodes with pick and place elements in it (is specific order)
-            # First node is the rest cartesian node (denotes the depot in CVRP optimization via OR TOOLS)
-            rest_cartesian = [-0.112957249941, 2.9801544038e-05, 0.590340135745]
-            nodes = []
-            nodes.append(rest_cartesian)
-            for element in pick_list:
-                nodes.append[element]
-            for element in place_list:
-                nodes.append[element]
-
-            # 6. Create the data model using nodes information
-            data = self.create_data_model(nodes)
-            # 7. Solve and get plan
-            plan = self.solve_orTools(data)
-
-            print("************************End***********************************************")
-            exit()
-
-
-
             
             # 4. Update red node info
             self.update_red_nodes(self.detected_object_label_list)
