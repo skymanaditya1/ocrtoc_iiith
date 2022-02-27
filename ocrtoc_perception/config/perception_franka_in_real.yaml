@@ -89,5 +89,5 @@ response:
 debug: False
 debug_pointcloud: False
 
-contact_graspnet: True
-6dof_graspnet: False
+contact_graspnet: False
+6dof_graspnet: True

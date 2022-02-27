@@ -1,3 +1,5 @@
+#!/usr/bin/env python3.6
+
 """Simple Pickup Delivery Problem (PDP)."""
 
 from ortools.constraint_solver import routing_enums_pb2
@@ -20,6 +22,8 @@ def create_data_model():
     nodes = [[0, 0, 0], [31, 34, 31], [19, 27, 1], [9, 19, 5], [12, 34, 10], [43, 32, 38], [5, 26, 65], [17, 25, 20], [46, 43, 90] ]
 
     dm = distance_matrix(nodes, nodes)
+    
+    print("Distance matrix: {}".format(dm))
 
     data['distance_matrix'] = dm
     data['pickups_deliveries'] = [
@@ -35,8 +39,11 @@ def create_data_model():
     data['num_vehicles'] = 1
     data['depot'] = 0
     
-    data['demands'] = [0, 1, 1, 1, 1, -1, -1, -1, -1] # [1, 1, 1, 1, -1, -1, -1, -1]
+    data['demands'] =  [0, 1, 1, 1, 1, -1, -1, -1, -1] # [1, 1, 1, 1, -1, -1, -1, -1]
     data['vehicle_capacities'] = [1]
+    
+    print("Data: {}".format(data))
+    
     return data
 
 
@@ -79,6 +86,7 @@ def main():
         """Returns the demand of the node."""
         # Convert from routing variable Index to demands NodeIndex.
         from_node = manager.IndexToNode(from_index)
+        print("From node: {}".format(from_node))
         return data['demands'][from_node]
 
     # Define cost of each arc.
@@ -87,6 +95,7 @@ def main():
         # Convert from routing variable Index to distance matrix NodeIndex.
         from_node = manager.IndexToNode(from_index)
         to_node = manager.IndexToNode(to_index)
+        print("From node: {}\tTo node: {}\tDistance: {}".format(from_node, to_node, data['distance_matrix'][from_node][to_node]))
         return data['distance_matrix'][from_node][to_node]
 
     demand_callback_index = routing.RegisterUnaryTransitCallback(
@@ -136,7 +145,9 @@ def main():
     # Print solution on console.
     if solution:
         print_solution(data, manager, routing, solution)
+    print("Hi, what's up!")
     print(solution)
+    print("Hi, what's up!")
 
 
 if __name__ == '__main__':

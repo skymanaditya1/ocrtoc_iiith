@@ -1,3 +1,5 @@
+#!/usr/bin/env python3
+
 '''ORTOOLS based Task planner
 Uses OR-Tools to find a an optimal task plan 
 
@@ -758,26 +760,40 @@ class TaskPlanner(object):
         # Trying 3D nodes
         # nodes = [[0, 0, 0], [31, 34, 31], [19, 27, 1], [9, 19, 5], [12, 34, 10], [43, 32, 38], [5, 26, 65], [17, 25, 20], [46, 43, 90] ]
 
-        dm = distance_matrix(nodes, nodes)
+        dm = distance_matrix(nodes, nodes).tolist()
 
         data['distance_matrix'] = dm
-        data['pickups_deliveries'] = [
-            [1, 5],
-            [2, 6],
-            [3, 7],
-            [4, 8]
-        ]
+        # data['pickups_deliveries'] = [
+        #     [1, 5],
+        #     [2, 6],
+        #     [3, 7],
+        #     [4, 8]
+        # ]
+        data['pickups_deliveries'] = []
+        n_picks = (len(nodes) - 1)/2
+        for i in range(n_picks):
+            data['pickups_deliveries'].append([i+1, n_picks+i+1])
+        
         data['num_vehicles'] = 1
         data['depot'] = 0
         
-        data['demands'] = [0, 1, 1, 1, 1, -1, -1, -1, -1] # [1, 1, 1, 1, -1, -1, -1, -1]
-        data['vehicle_capacities'] = [1]
+        data['demands'] = [] # [0] # [0, 1, 1, 1, 1, -1, -1, -1, -1] Had to comment for python2.7
+        for i in range(len(nodes)):
+            if i==0:
+                data['demands'].append(0)
+            elif i<= int(len(nodes)/2):
+                data['demands'].append(1)
+            else:
+                data['demands'].append(-1)
+                
+        data['vehicle_capacities'] = [1] # Commented for python2.7
         return data
 
     def print_solution(self, data, manager, routing, solution):
         """Prints solution on console."""
-        import time
-        t = time.time()
+        # print(f"Objective: {solution.ObjectiveValue()}")
+        print("Objective: {}".format(solution.ObjectiveValue()))
+        # print("")
         total_distance = 0
         for vehicle_id in range(data['num_vehicles']):
             index = routing.Start(vehicle_id)
@@ -790,34 +806,63 @@ class TaskPlanner(object):
                 route_distance += routing.GetArcCostForVehicle(
                     previous_index, index, vehicle_id)
             plan_output += '{}\n'.format(manager.IndexToNode(index))
-            plan_output += 'Distance of the route: {}m\n'.format(route_distance)
+            plan_output += 'Distance of the route: {}m\n'.format(float(route_distance)/100)
             print(plan_output)
-            total_distance += route_distance
-        print("total time taken:", time.time()-t)
+            total_distance += float(route_distance)/100
         print('Total Distance of all routes: {}m'.format(total_distance))
+        # [END solution_printer]
+        
+    def get_final_sequence_from_ORsolution(self, data, manager, routing, solution):
+        """Returns the final sequence of actions by decoding the solution spit out by OR TOOLS optimization
+
+        Returns:
+            final_sequence: [list of action_indices]
+        """
+        final_sequence = []
+        for vehicle_id in range(data['num_vehicles']):
+            index = routing.Start(vehicle_id)
+            plan_output = 'Route for vehicle {}:\n'.format(vehicle_id)
+            route_distance = 0
+            while not routing.IsEnd(index):
+                final_sequence.append(manager.IndexToNode(index))
+                # plan_output += ' {} -> '.format(manager.IndexToNode(index))
+                previous_index = index
+                index = solution.Value(routing.NextVar(index))
+                # route_distance += routing.GetArcCostForVehicle(
+                    # previous_index, index, vehicle_id)
+            final_sequence.append(manager.IndexToNode(index))
+            # plan_output += '{}\n'.format(manager.IndexToNode(index))
+            # plan_output += 'Distance of the route: {}m\n'.format(float(route_distance)/100)
+            print("Final sequence: {}, type: {}".format(final_sequence, type(final_sequence)))
+            # total_distance += float(route_distance)/100
+        return final_sequence
 
     def solve_orTools(self, data):
+        """Entry point of the program."""
+        # Instantiate the data problem.
+        # [START data]
+        # data = create_data_model()
+        # [END data]
+
         # Create the routing index manager.
+        # [START index_manager]
         manager = pywrapcp.RoutingIndexManager(len(data['distance_matrix']),
                                             data['num_vehicles'], data['depot'])
+        # [END index_manager]
 
         # Create Routing Model.
+        # [START routing_model]
         routing = pywrapcp.RoutingModel(manager)
 
+        # [END routing_model]
+        
         def demand_callback(from_index):
             """Returns the demand of the node."""
             # Convert from routing variable Index to demands NodeIndex.
             from_node = manager.IndexToNode(from_index)
+            print("From node: {}".format(from_node))
             return data['demands'][from_node]
-
-        # Define cost of each arc.
-        def distance_callback(from_index, to_index):
-            """Returns the manhattan distance between the two nodes."""
-            # Convert from routing variable Index to distance matrix NodeIndex.
-            from_node = manager.IndexToNode(from_index)
-            to_node = manager.IndexToNode(to_index)
-            return data['distance_matrix'][from_node][to_node]
-
+        
         demand_callback_index = routing.RegisterUnaryTransitCallback(
             demand_callback)
         routing.AddDimensionWithVehicleCapacity(
@@ -827,22 +872,34 @@ class TaskPlanner(object):
             True,  # start cumul to zero
             'Capacity')
 
+        # Define cost of each arc.
+        # [START arc_cost]
+        def distance_callback(from_index, to_index):
+            """Returns the manhattan distance between the two nodes."""
+            # Convert from routing variable Index to distance matrix NodeIndex.
+            from_node = manager.IndexToNode(from_index)
+            to_node = manager.IndexToNode(to_index)
+            return int(data['distance_matrix'][from_node][to_node]*100)
 
         transit_callback_index = routing.RegisterTransitCallback(distance_callback)
         routing.SetArcCostEvaluatorOfAllVehicles(transit_callback_index)
+        # [END arc_cost]
 
         # Add Distance constraint.
+        # [START distance_constraint]
         dimension_name = 'Distance'
         routing.AddDimension(
             transit_callback_index,
             0,  # no slack
-            10000,  # vehicle maximum travel distance
+            300000,  # vehicle maximum travel distance
             True,  # start cumul to zero
             dimension_name)
         distance_dimension = routing.GetDimensionOrDie(dimension_name)
         distance_dimension.SetGlobalSpanCostCoefficient(100)
+        # [END distance_constraint]
 
         # Define Transportation Requests.
+        # [START pickup_delivery_constraint]
         for request in data['pickups_deliveries']:
             pickup_index = manager.NodeToIndex(request[0])
             delivery_index = manager.NodeToIndex(request[1])
@@ -853,20 +910,55 @@ class TaskPlanner(object):
             routing.solver().Add(
                 distance_dimension.CumulVar(pickup_index) <=
                 distance_dimension.CumulVar(delivery_index))
+        # [END pickup_delivery_constraint]
 
         # Setting first solution heuristic.
+        # [START parameters]
         search_parameters = pywrapcp.DefaultRoutingSearchParameters()
         search_parameters.first_solution_strategy = (
-            routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC)
+            routing_enums_pb2.FirstSolutionStrategy.AUTOMATIC) # .PARALLEL_CHEAPEST_INSERTION)
+        # [END parameters]
 
         # Solve the problem.
+        # [START solve]
         solution = routing.SolveWithParameters(search_parameters)
+        # [END solve]
 
         # Print solution on console.
+        # [START print_solution]
         if solution:
-            print("Solution found!!")
             self.print_solution(data, manager, routing, solution)
-        print("Solution: {}".format(solution))
+            
+        # print(solution)
+        plan = self.get_final_sequence_from_ORsolution(data, manager, routing, solution)
+        return solution, plan
+        # [END print_solution]
+    
+    def execute_plan(self, action_list, action_sequence_mapping):
+        '''Given the list of actions in sequence, execute them one by one and return the completed objects list
+        '''
+        success = False
+        completed_objects = []
+        for action in action_list:
+            name = action_sequence_mapping[str(action)]['name']
+            object_name = action_sequence_mapping[str(action)]['object']
+            if self.search_strings([name], searchable='pick'):
+                print("Going to pick {}\t|\t".format(object_name))
+                success = self.go_pick_object(object_name=object_name)
+                if success == False:
+                    print("Pick failed")
+                else:
+                    print("Pick success")
+            elif self.search_strings([name], searchable='place') and success==True:
+                print("Going to place {}\t|\t".format(object_name))
+                success = self.go_place_object(object_name)
+                if success == False:
+                    print("Place failed")
+                else:
+                    print("Place success")
+                    completed_objects.append(object_name)
+        return completed_objects
+            
         
     # get poses of part of objects each call of perception node, call perception node and plan task several times
     def cycle_plan_all(self):
@@ -882,18 +974,29 @@ class TaskPlanner(object):
 
         print("Cycle plan function started executing!")
         left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
-        if self.search_strings(left_object_labels, searchable='clear_box'):
-            self.clear_box_flag = True
-            print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+        
+        # Remove clear_box from the list of movable objects
+        temp = []
+        for object in left_object_labels:
+            if self.search_strings([object], searchable='clear_box'):
+                print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+                continue
+            temp.append(object)
+        left_object_labels = copy.deepcopy(temp)
+        print("Final target object list after removing clear boxes: {}".format(left_object_labels))
+        
+        # if self.search_strings(left_object_labels, searchable='clear_box'):
+        #     self.clear_box_flag = True
+        #     print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
             
         # 1. Create black nodes for target poses
         # self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
         # 2. Create red nodes for initial poses
         # self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
             
-        count = 5
-        while len(left_object_labels) > 0 and count > 0:
-            count -= 1
+        count = 0
+        while len(left_object_labels) > 0 and count <= 5:
+            count += 1
             # 3. Get information about left objects from perception node
             rospy.loginfo('Try to get information of left objects from perception node')
             self.get_pose_perception(left_object_labels)
@@ -922,8 +1025,8 @@ class TaskPlanner(object):
 
             # nodes = []
 
-            for lab_index, label in self.detected_object_label_list:
-                print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
+            for lab_index, label in enumerate(self.detected_object_label_list):
+                print("{} is in the object list*********************+++++++++++++*****************".format(label))
                 # node.pickable = True
                 pose_cartesian = self.object_init_pose_dict[label].position
                 pick_grasp_cartesian = self.object_pick_grasp_pose_dict[label].position
@@ -943,35 +1046,26 @@ class TaskPlanner(object):
             nodes = []
             nodes.append(rest_cartesian)
             for element in pick_list:
-                nodes.append[element]
+                nodes.append(element)
             for element in place_list:
-                nodes.append[element]
+                nodes.append(element)
 
             # 6. Create the data model using nodes information
             data = self.create_data_model(nodes)
             # 7. Solve and get plan
-            plan = self.solve_orTools(data)
-
-            print("************************End***********************************************")
-            exit()
-
-
-
+            solution, plan = self.solve_orTools(data)
             
-            # 4. Update red node info
-            self.update_red_nodes(self.detected_object_label_list)
+            print("Decoded solution")
+            for action in plan:
+                print('{}-->'.format(action_sequence_mapping[str(action)]['name']))
+            print("End!")
             
-            # 5. Get point cloud from kinect and build an occupancy grid
-            # current_pcd = self.get_point_cloud_from_kinect()
-            # print("Total number of points in pcd: {}".format(len(current_pcd.points)))
-            # occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
-            # self.update_black_nodes(current_pcd, occ_map)
-            # prospective_pcd = self.construct_pcd_of_targets()
-            # 6. Start task plan
-            completed_objects = self.solve()
-            # self.solve(occ_map=occ_map)
+            print("Executing the plan!")
             
-            # 7. Remove completed objects
+            # 8. Execute plan
+            completed_objects = self.execute_plan(plan, action_sequence_mapping)
+            
+            # 9. Remove completed objects
             temp = []
             for object in left_object_labels:
                 if object in completed_objects:
@@ -979,7 +1073,8 @@ class TaskPlanner(object):
                 temp.append(object)
             left_object_labels = temp
             print("left objects: {}".format(left_object_labels))
-            
+
+            print("************************Iteration {}***********************************************".format(count))
             
             
     def find_red_node(self, node_list):
