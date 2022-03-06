@@ -82,12 +82,50 @@ class MiscFunctions:
         points = np.asarray(pcd.points)
         colors = np.asarray(pcd.colors)
         return points, colors
+
+class Object:
+    def __init__(self, mesh_path):
+        '''
+        '''
+        self.mesh = o3d.io.read_triangle_mesh(mesh_path)
+        self.copy_mesh = None
+    
+    def render_to_pose(self, object_pose):
+        '''
+        Parameters:
+        object_pose: [6 element list] (x, y, z, roll, pitch, yaw)
+        '''
+        self.copy_mesh = copy.deepcopy(self.mesh)
+        R = self.copy_mesh.get_rotation_matrix_from_xyz((object_pose[3], object_pose[4], object_pose[5]))
+        center = np.array(self.copy_mesh.get_center())
+        self.copy_mesh.rotate(R, center=True)
+        required_pos = np.array([object_pose[0], object_pose[1], object_pose[2]])
+        dt = required_pos - center
+        self.copy_mesh.translate((dt[0], dt[1], dt[2]))
+
+
+    def get_pcd_from_copy_mesh(self, n_pts = 1000):
+        '''
+        Parameters:
+        n_pts: Number of points to be sampled
+        '''
+        pcd = self.copy_mesh.sample_points_poisson_disk(number_of_points=1000, init_factor=5, pcl=None)
+        return pcd
+
+    def render_to_pose_and_get_pcd(self, object_pose, n_pts = 1000):
+        '''
+        Parameters:
+        object_pose: [6 element list] (x, y, z, roll, pitch, yaw)
+        n_pts: Number of points to be sampled
+        '''
+        self.render_to_pose(object_pose=object_pose)
+        return self.get_pcd_from_copy_mesh(n_pts=n_pts)
     
 class OccupancyAndBuffer:
     def __init__(self):
         pass
     
-    def generate_2D_occupancy_map(self, world_dat, x_min=None, y_min=None, x_range=None, y_range=None, threshold=3, dir_path='/root/occ_map.png'):
+    def generate_2D_occupancy_map(self, world_dat, x_min=None, y_min=None, x_range=None, y_range=None, threshold=3, dir_path='/root/occ_map.png', save = False):
         '''
         A non-traditional way to mark occupied areas on a grid. In this method, we simply look for 
         areas with z>threshold (threshold~0) and mark them as occupied. This is expected to be highly
@@ -159,6 +197,101 @@ class OccupancyAndBuffer:
         # print(distances)
         # print("Valid empties: {}".format(valid_empties))
         return valid_empties[closest_ind]
+    
+    def get_occupancy_percentage(self, target_pose_6D, scene_omap, entity):
+        '''Gets the percentage of target space that is occupied
+        '''
+        entity_pcd = entity.render_to_pose_and_get_pcd(object_pose=target_pose_6D)
+        entity_omap = self.generate_2D_occupancy_map(world_dat = np.asarray(entity_pcd.points)*100, xy_min_max=[-30, 30, -60, 60], threshold=1, dir_path='./results/object_{}-{}.png'.format('2-2-2', 'green_bowl'), save=False)
+        if len(entity_omap) == 0:
+            return 100
+        occupancy = np.logical_and(scene_omap, entity_omap)
+        # print("Occupancy shape: {}".format(occupancy.shape))
+        total_occupied_space_of_object = np.sum(entity_omap)
+        occ_percent = float(np.sum(occupancy)*100.0)/(total_occupied_space_of_object)
+
+        return occ_percent
+
+    def sample_8_pts_around_given_point(self, given_pt, step=0.1):
+        '''Samples 9 points symmetrically in a square fashion around the given point in sample plane (z unchanged)
+        xxx
+        xox
+        xxx
+        Here, 'x' denote the sampled point, while 'o' denotes the given point
+        Parameters:
+        given_pt: list (1, 3): given point's 3D position
+        step: size of the step
+        Return:
+        pts = list (9, 3) # Includes the current point
+        '''
+        pts = []
+        for i in range(-1, 2, 1):
+            for j in range(-1, 2, 1):
+                # print(given_pt)
+                x = given_pt[0]+(i*step)
+                y = given_pt[1]+(j*step)
+                z = given_pt[2]
+                # print(x, y, z)
+                new_pt = [x, y, z]
+                # print(new_pt)
+                pts.append(new_pt)
+        return pts
+
+    def marching_grid(self, scene_pcd, object_mesh_path, target_pose_6D, OCC_THRESH=0.0, scene_name='-', object_name='-'):
+        '''Marching Grid algorithm
+        Returns the closest empty buffer space to the given target using marching grid algorithm
+        Parameters:
+        scene_pcd: Point cloud of the 3D scene
+        object_mesh_path: Path to the mesh file of the object
+        target_position_3D: list [x, y, z, roll, pitch, yaw] - Target 6D pose of object in world frame
+        OCC_THRESH: The maximum % for which a pose is considered to be free
+        Return:
+        buffer_spot: np.ndarray [x, y, z, roll, pitch, yaw] in world frame (same frame as the given world_data and 
+                        target_position 3D)
+        '''
+        scene_omap = self.generate_2D_occupancy_map(np.asarray(scene_pcd.points)*100, threshold=1, dir_path='./results/{}-{}.png'.format(scene_name, object_name), save=False) # xy_min_max=[-29.97, 29.97, -59.96, 59.99]
+        entity = Object(mesh_path=object_mesh_path)
+
+        occ_percent = self.get_occupancy_percentage(target_pose_6D=target_pose_6D, scene_omap=scene_omap, entity=entity)
+        print("Occupancy %: {}%".format(occ_percent))
+        if occ_percent<=OCC_THRESH:
+            print("Found!")
+            return target_pose_6D
+
+
+        done = False
+        search_step = 0.1
+        current_position = [target_pose_6D[0], target_pose_6D[1], target_pose_6D[2]]
+        prev_min_val = 100
+        n_steps = 3
+        while not done and n_steps>0:
+            n_steps = n_steps - 1
+            sampled_pts = self.sample_8_pts_around_given_point(given_pt=current_position, step=search_step)
+            occ_percents = []
+            for i, pt in enumerate(sampled_pts):
+                pose_6d = [pt[0], pt[1], pt[2], target_pose_6D[3], target_pose_6D[4], target_pose_6D[5]]
+                occ_percent = self.get_occupancy_percentage(target_pose_6D=pose_6d, scene_omap=scene_omap, entity=entity)
+                occ_percents.append(occ_percent)
+            print(occ_percents)
+            
+            min_val = min(occ_percents)
+            min_index = occ_percents.index(min_val)
+            print("min_index: {}\tmin_val: {}".format(min_index, min_val))
+            if min_val <= OCC_THRESH:
+                print("Min pose found")
+                done = True
+                current_position = sampled_pts[min_index]
+            elif min_val==prev_min_val:
+                current_position = sampled_pts[min_index]
+                search_step = search_step/2
+            elif min_val > prev_min_val:
+                search_step = search_step/2
+
+        buffer_spot = [current_position[0], current_position[1], current_position[2], 
+                    target_pose_6D[3], target_pose_6D[4], target_pose_6D[5]]
+        print(buffer_spot)
+
+        return buffer_spot
     
     
     def get_empty_spot(self, pcd = [], occ_map = [], closest_target = np.array([])):
@@ -328,6 +461,7 @@ class TaskPlanner(object):
         
         
         self.block_labels = blocks
+        self.object_label_mesh_path_dict = {}
         self.object_goal_pose_dict = self.get_goal_pose_dict(self.block_labels, goal_cartesian_poses)
         self.block_labels_with_duplicates = self.object_goal_pose_dict.keys()
         
@@ -370,6 +504,7 @@ class TaskPlanner(object):
             print("Poses type: {}".format(type(poses)))
             for i, pose in enumerate(poses.poses):
                 goal_pose_dict["{}_v{}".format(label, i)] = pose
+                self.object_label_mesh_path_dict["{}_v{}".format(label, i)] = '/root/ocrtoc_ws/src/ocrtoc_materials/models/{}/textured.obj'.format(label)
             # goal_pose_dict[label] = pose
         return goal_pose_dict    
 
@@ -853,8 +988,14 @@ class TaskPlanner(object):
                 head.done = True
                 head.type = 'b'
                 print(occ_map)
-                target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y])
-                buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
+                # target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y])
+                target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y, head.target_black[0].pose.position.z,
+                                             head.target_black[0].pose.orientation.x, head.target_black[0].pose.orientation.y, 
+                                             head.target_black[0].pose.orientation.z, head.target_black[0].pose.orientation.w])
+                print("object_mesh_path={}".format(self.object_label_mesh_path_dict[head.object]))
+                buffer_spot_2d = self.occ_and_buffer.marching_grid(scene_pcd=current_pcd, object_mesh_path=self.object_label_mesh_path_dict[head.object],
+                                                                   target_pose_6D= target_cart_pose, OCC_THRESH=1.0, scene_name='-', object_name='-')
+                # buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
                 buffer_pose = copy.deepcopy(self.object_init_pose_dict[head.object])
                 buffer_pose.position.x = buffer_spot_2d[0]
                 buffer_pose.position.y = buffer_spot_2d[1]
