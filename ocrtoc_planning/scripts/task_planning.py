@@ -1,8 +1,7 @@
 '''Heuristic Graph-based planner
 This graph based planner handles final scene stacking and replacement scenarios very robustly
 
-Team RRC
-Author: Vishal Reddy Mandadi
+Team Lumos
 
 Assumptions:
 1. We get the semantic information about stacking from scene graph generators or related methods
@@ -202,7 +201,8 @@ class OccupancyAndBuffer:
         '''Gets the percentage of target space that is occupied
         '''
         entity_pcd = entity.render_to_pose_and_get_pcd(object_pose=target_pose_6D)
-        entity_omap = self.generate_2D_occupancy_map(world_dat = np.asarray(entity_pcd.points)*100, xy_min_max=[-30, 30, -60, 60], threshold=1, dir_path='./results/object_{}-{}.png'.format('2-2-2', 'green_bowl'), save=False)
+        entity_omap = self.generate_2D_occupancy_map(world_dat = np.asarray(entity_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120,
+                                                     threshold=1, dir_path='./results/object_{}-{}.png'.format('2-2-2', 'green_bowl'), save=False) # xy_min_max=[-30, 30, -60, 60], 
         if len(entity_omap) == 0:
             return 100
         occupancy = np.logical_and(scene_omap, entity_omap)
@@ -249,7 +249,8 @@ class OccupancyAndBuffer:
         buffer_spot: np.ndarray [x, y, z, roll, pitch, yaw] in world frame (same frame as the given world_data and 
                         target_position 3D)
         '''
-        scene_omap = self.generate_2D_occupancy_map(np.asarray(scene_pcd.points)*100, threshold=1, dir_path='./results/{}-{}.png'.format(scene_name, object_name), save=False) # xy_min_max=[-29.97, 29.97, -59.96, 59.99]
+        scene_omap = self.generate_2D_occupancy_map(np.asarray(scene_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120,
+                                                    threshold=1, dir_path='./results/{}-{}.png'.format(scene_name, object_name), save=False) # xy_min_max=[-29.97, 29.97, -59.96, 59.99]
         entity = Object(mesh_path=object_mesh_path)
 
         occ_percent = self.get_occupancy_percentage(target_pose_6D=target_pose_6D, scene_omap=scene_omap, entity=entity)

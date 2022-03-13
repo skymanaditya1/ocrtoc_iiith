@@ -26,3 +26,6 @@ Task name: 1-1-1 | Scene mean score: 0.210711541069 | Time cost: 141.356396914
 Task name: 1-1-1 | Scene mean score: 0.210765349255 | Time cost: 144.78946805
 Task name: 1-1-1 | Scene mean score: 0.210867426379 | Time cost: 139.33612299
 Task name: 1-1-1 | Scene mean score: 0.210397507921 | Time cost: 602.011724949
+Task name: 1-1-1 | Scene mean score: 0.210520236134 | Time cost: 224.830997944
+Task name: 1-1-1 | Scene mean score: 0.210601065805 | Time cost: 172.358236074
+Task name: 1-1-1 | Scene mean score: 0.210861978308 | Time cost: 167.908096075
