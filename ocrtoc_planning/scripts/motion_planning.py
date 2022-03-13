@@ -8,6 +8,11 @@ import sys
 import yaml
 import tf
 
+from glob import glob
+
+import cv2
+import random
+
 import actionlib
 import control_msgs.msg
 from geometry_msgs.msg import Pose, PoseStamped, Quaternion, Transform
@@ -16,8 +21,14 @@ import moveit_msgs.msg
 import rospkg
 import rospy
 import time
-
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
 from ocrtoc_common.transform_interface import TransformInterface
+
+try:
+  from pathlib import Path
+except ImportError:
+  from pathlib2 import Path  # python 2 backport
 
 class MotionPlanner(object):
     def __init__(self):
@@ -89,7 +100,7 @@ class MotionPlanner(object):
         entrance_transformation.rotation.z = 0
         entrance_transformation.rotation.w = 1
         self._entrance_transformation_matrix = self._transformer.ros_transform_to_matrix4x4(entrance_transformation)
-
+        self.br = CvBridge()
         ee_transform = self._transformer.lookup_ros_transform("panda_ee_link", "panda_link8")
         self._ee_transform_matrix = self._transformer.ros_transform_to_matrix4x4(ee_transform.transform)
 
@@ -98,44 +109,7 @@ class MotionPlanner(object):
         self.place()
         rospy.sleep(1.0)
 
-    def test(self):
-        
-        print("test 1, joint space to a goal")
-        pose_goal = Pose()
-        # pose_goal.orientation.w = 1.0
-        # pose_goal.position.x = 0.1
-        # pose_goal.position.y = 0.3
-        # pose_goal.position.z = 0.2
-        # self.move_joint_space(pose_goal)
-        
-        
-        print("test 2 joint space to rest")
-        
-        self.to_rest_pose()
-        
-        print("test 3 cartesian to goal")
-        pose_goal.orientation.w = 1.0
-        pose_goal.position.x = 0.1
-        pose_goal.position.y = -0.3
-        pose_goal.position.z = 0.2
-        # self.move_joint_space(pose_goal)
-        self.move_cartesian_space_upright(pose_goal)
-        
-        print("test 4 joint to goal")
-        
-        self.to_rest_pose()
-        
-        print("test 5 cartesian to goal")
-        pose_goal.orientation.w = 1.0
-        pose_goal.position.x = 0.1
-        pose_goal.position.y = 0.3
-        pose_goal.position.z = 0.2
-        self.move_cartesian_space_upright(pose_goal)
-        
-        print("test 6 joint to goal")
-        
-        self.to_rest_pose()
-        
+         
         
 
 
@@ -157,26 +131,7 @@ class MotionPlanner(object):
 
     # move to specified home pose
     def to_rest_pose(self):
-        
-# ('rest pose x,y,z: ', position: 
-#   x: -0.112957249941
-#   y: 2.9801544038e-05
-#   z: 0.590340135745
-# orientation: 
-#   x: -0.923949504923
-#   y: 0.382514458771
-#   z: -3.05585242637e-05
-#   w: 1.57706453844e-05)
 
-# ('rest pose x,y,z: ', position: 
-#   x: -0.112941989314
-#   y: 3.41328147894e-05
-#   z: 0.59039232584
-# orientation: 
-#   x: 0.923962395658
-#   y: -0.382483316194
-#   z: -6.25240426226e-05
-#   w: 1.82797910597e-05)
 
         rest_pose = Pose()
         
@@ -256,7 +211,8 @@ class MotionPlanner(object):
         return from_home_result
 
     # generate cartesian straight path
-    def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action='pick'):
+    # target object list is a dictionary of leftover objects
+    def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action='pick', target_object_list=None):
         # get a list of way points to target pose, including entrance pose, transformation needed
         # transform panda_ee_link goal to panda_link8 goal.
         
@@ -280,6 +236,75 @@ class MotionPlanner(object):
         
             if i==1 and last_gripper_action=='place':
                 self.to_rest_pose()
+            # indicates pick action
+            elif i==1:
+                self.to_rest_pose()
+                
+                # rospy.Subscriber("/kinect/color/image_rect_color", Image, callback)
+                # def callback(msg):
+                #     self.image = self.br.imgmsg_to_cv2(msg)
+                image = rospy.wait_for_message("/kinect/color/image_rect_color", Image)
+                image = self.br.imgmsg_to_cv2(image)
+                image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+                
+                BASE_DIR = '/root/ocrtoc_ws/src/image_seg'
+                # os.makedirs(BASE_DIR, exist_ok=True)
+                Path(BASE_DIR).mkdir(exist_ok=True, parents=True)
+                
+                def get_random_name(CHAR_LEN=5):
+                    chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+                    return ''.join([chars[random.randint(0, len(chars)-1)] for i in range(CHAR_LEN)])
+                
+                random_path = get_random_name()
+                
+                # save the scene image to the directory
+                scene_filename = random_path + '.jpg'
+                
+                
+                scene_dir = os.path.join(BASE_DIR, 'scenes')
+                # os.makedirs(scene_dir, exists_ok=True)
+                Path(scene_dir).mkdir(exist_ok=True, parents=True)
+                
+                # get the target images from the pyyaml file based on the objects                
+                scene_image_path = os.path.join(scene_dir, scene_filename)
+                cv2.imwrite(scene_image_path, image)
+                
+                target_objects_path = '/root/ocrtoc_ws/src/ocrtoc_perception/src/ocrtoc_perception/pose/rendered_object_images'
+                
+                target_objects = list() # list of target object filepaths - take the 000001.png
+                all_objects = glob(target_objects_path + '/*')
+                
+                for target_object in target_object_list.keys():
+                    target_object = target_object.rsplit('_', 1)[0]
+                    target_object += '720_1280'
+                    
+                    inter_object_path = os.path.join(os.path.join(target_objects_path, target_object), '000001.png')
+                    print("inter_object_path", inter_object_path)
+                    if os.path.exists(inter_object_path):
+                        target_objects.append(inter_object_path)
+                    
+                target_object_string = ';'.join(target_object for target_object in target_objects)
+                
+                
+                print("!!!!!!!!!!!!!!")
+                print("target object string", target_object_string)
+                target_images_dir = os.path.join(os.path.join(BASE_DIR, 'target_images'), random_path)
+                # os.makedirs(target_images_dir, exists_ok=True)
+                Path(target_images_dir).mkdir(exist_ok=True, parents=True)
+                
+                # target_images_dir = os.path.join(target_images_dir, random_path)
+                
+                command = '/root/ocrtoc_ws/src/ocrtoc_planning/scripts/run_mmdetection_segmentation.sh {} {} {}' \
+                    .format(scene_image_path, target_object_string, target_images_dir)
+                
+                print('Running object image segmentation')
+                os.system(command)
+                                    
+                # run the object instance segmentation on the image and get the matched object
+                
+                # kinect_image = image
+            
+                
             fraction = 0
             attempts = 0
             waypoints = []
@@ -736,7 +761,7 @@ if __name__ == '__main__':
     planner = MotionPlanner()
     end_effector_link = planner._move_group.get_end_effector_link()
     print('manipulator end-effector link name: {}'.format(end_effector_link))
-    # pose_goal = []
+       # pose_goal = []
     # pose_target = Pose()
     # pose_target.position.x = 0.1
     # pose_target.position.y = 0.5
