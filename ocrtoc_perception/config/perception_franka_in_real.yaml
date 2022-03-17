@@ -80,7 +80,7 @@ superglue:
         min_correspondence_thresh: 5
 
 graspnet:
-    refine_approach_dist: 0.081
+    refine_approach_dist: 0.09
 
 response:
     dist_thresh: 0.1
