@@ -5,6 +5,7 @@ import cv2
 from numpy.core.numeric import full
 import rospy
 import rospkg
+import random
 
 # import tf.transformations
 
@@ -343,9 +344,11 @@ class Perceptor():
         Step 1: Call the contact graspnet API to generate the grasp poses
         '''
         # 1. Initialize all the paths and the data.
-        SAVE_PATH_NPZ = '/root/ocrtoc_ws/src/contact_graspnet/{}'.format('temp.npy')
-        SAVE_PATH_COLORS = '/root/ocrtoc_ws/src/contact_graspnet/{}'.format('temp_colors.npy')
-        GRASP_SAVE_PATH = '/root/ocrtoc_ws/src/contact_graspnet/{}'.format('grasps_temp.npy')
+        random_value = random.randint(0, 10000)
+        
+        SAVE_PATH_NPZ = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('temp', random_value)
+        SAVE_PATH_COLORS = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('temp_colors', random_value)
+        GRASP_SAVE_PATH = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('grasps_temp', random_value)
         
         points, _ = o3dp.pcd2array(full_pcd)
         full_pcd_as_np = -(points.copy())
@@ -409,7 +412,7 @@ class Perceptor():
         gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
         gg = self.graspnet_baseline.collision_detection(gg, points)
         
-        return gg, g_pose 
+        return gg, g_pose
     
     def compute_grasp_poses2(self, full_pcd):
         '''
@@ -512,6 +515,8 @@ class Perceptor():
         gg.rotation_matrices = eelink_rs
         
         return gg, g_pose 
+    
+    
 
     # Calculates rotation matrix to euler angles
     # The result is the same as MATLAB except the order

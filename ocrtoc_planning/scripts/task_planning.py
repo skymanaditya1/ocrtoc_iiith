@@ -161,6 +161,10 @@ class OccupancyAndBuffer:
         occ_map = np.zeros(shape=pixel_counts.shape, dtype=np.uint8)
         for i in range(x_range):
             for j in range(y_range):
+                if i<=4 or i>x_range - 4:
+                    occ_map[i, j] = 1 # Set boundaries as occupied
+                if j<=4 or j>y_range - 4:
+                    occ_map[i, j] = 1 # Set boundaries as occupied
                 if pixel_counts[i, j] >= threshold:
                     occ_map[i, j] = 1 # Occupied
 
@@ -719,7 +723,7 @@ class TaskPlanner(object):
         return red_nodes
 
 
-    def update_red_nodes(self, detected_object_label_list):
+    def update_red_nodes(self, detected_object_label_list, done_object_labels):
         '''
         Here, we assume that object initial and grasp poses are provided to us. We add this information to the nodes
         
@@ -730,6 +734,10 @@ class TaskPlanner(object):
             if node.object in detected_object_label_list:
                 print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
                 if node.done == True or node.type == 'b':
+                    continue
+                elif node.object in done_object_labels:
+                    node.done = True
+                    node.target_black[0].done = True
                     continue
                 node.pickable = True
                 node.pose = self.object_init_pose_dict[node.object]
@@ -911,8 +919,25 @@ class TaskPlanner(object):
             self.get_pose_perception(left_object_labels)
             print("Detected object list: {}".format(self.detected_object_label_list))
             
-            # 4. Update red node info
-            self.update_red_nodes(self.detected_object_label_list)
+            # 4. Update the list of objects for which manipulation has to be performed
+            done_object_labels = []
+            for label in self.detected_object_label_list:
+                g_p = self.object_goal_pose_dict[label].position
+                obj_goal_pose = np.array([g_p.x, g_p.y, g_p.z])
+                i_p = self.object_init_pose_dict[label].position
+                obj_init_pose = np.array([i_p.x, i_p.y, i_p.z])
+                if np.linalg.norm(obj_goal_pose - obj_init_pose) < 0.05:
+                    done_object_labels.append(label)
+                    
+            # for node in self.red_nodes:
+                
+                    
+            # for label in done_object_labels:
+                
+                
+            
+            # 5. Update red node info
+            self.update_red_nodes(self.detected_object_label_list, done_object_labels)
             
             # 5. Get point cloud from kinect and build an occupancy grid
             # current_pcd = self.get_point_cloud_from_kinect()
@@ -974,13 +999,22 @@ class TaskPlanner(object):
             head = self.find_red_node(nodes)
             
             if head == None:
-                if len(occ_map) == 0:
-                    done = True
-                    continue
+                # if len(occ_map) == 0:
+                #     done = True
+                #     continue
                 head = self.just_find_red(nodes)
                 if head == None:
                     done = True
                     continue
+                
+                # First pick the object
+                res = self.go_pick_object(object_name=head.object)
+                if res==False:
+                    head.pickable = False
+                    self._motion_planner.place()
+                    continue
+                
+                
                 buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
                 buffer.occupied = copy.deepcopy(head.occupied)
                 buffer.target_black = [head.target_black[0]]
@@ -1004,7 +1038,7 @@ class TaskPlanner(object):
                 
                 # Pick and place in buffer
                 print("Generated buffer. Now, pick and place the object in buffer spot!")
-                res = self.go_pick_object(object_name=head.object)
+                # res = self.go_pick_object(object_name=head.object)
                 # if res == True:
                 self.go_place_object(object_name=head.object, final_place_pose=buffer_pose)
                 print("Placed in buffer!")

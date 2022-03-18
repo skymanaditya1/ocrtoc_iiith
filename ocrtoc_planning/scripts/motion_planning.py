@@ -254,7 +254,7 @@ class MotionPlanner(object):
 
         rospy.loginfo('move from home pose result' + str(from_home_result))
         return from_home_result
-
+    
     # generate cartesian straight path
     def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action='pick'):
         # get a list of way points to target pose, including entrance pose, transformation needed
@@ -279,7 +279,7 @@ class MotionPlanner(object):
         points_to_target = self.get_points_to_target_upright(group_goal)
         for i, point in enumerate(points_to_target):
         
-            if i==1 and last_gripper_action=='place':
+            if i==1: # and last_gripper_action=='place':
                 
                 self.to_rest_pose()
             fraction = 0
@@ -312,6 +312,7 @@ class MotionPlanner(object):
 
         rospy.loginfo('(upright path) Action finished, action result' + str(move_result))
         return move_result
+    
 
     # generate cartesian straight path
     def move_cartesian_space(self, pose_goal, via_up=False):
