@@ -254,6 +254,140 @@ class MotionPlanner(object):
 
         rospy.loginfo('move from home pose result' + str(from_home_result))
         return from_home_result
+
+    # move robot to home pose, then move from home pose to target pose
+    def move_from_home_pose(self, pose_goal):
+        from_home_result = True
+        to_home_result = self.to_home_pose()
+
+        if to_home_result:
+            points_to_target = self.get_points_to_target(pose_goal)
+            fraction = 0
+            attempts = 0
+            while fraction < 1.0 and attempts < self._max_attempts:
+                (plan, fraction) = self._move_group.compute_cartesian_path(
+                    points_to_target,                # way points
+                    self._plan_step_length,          # step length
+                    0.0,                             # disable jump
+                    True                             # enable avoid_collision
+                    )
+                attempts += 1
+
+            if fraction == 1.0:
+                self._move_group.execute(plan)
+                from_home_result = True
+            else:
+                from_home_result = False
+        else:
+            from_home_result = False
+
+        rospy.loginfo('move from home pose result' + str(from_home_result))
+        return from_home_result
+
+    def move_home_to_target_via_entry(self, pose_goal, via_up=True, last_gripper_action='pick'):
+        '''This functions moves the arm from home pose to pick/place pose via an entry waypoint
+        - Usually executed prior to pick/place operation
+        '''
+        # Pose goal correction
+        if pose_goal.position.z < 0.005:
+            pose_goal.position.z = 0.01
+        quaternion = [pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w]
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
+        print("Roll: {}, Pitch: {}, Yaw: {}".format(roll, pitch, yaw))
+        quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
+        pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w = quaternion
+        group_goal = self.ee_goal_to_link8_goal(pose_goal)
+        target_pose = copy.deepcopy(group_goal)
+
+        # Create an entry waypoint
+        points_to_target = []
+        enter_pose = copy.deepcopy(target_pose)
+        enter_pose.position.z += self._up2
+
+        points_to_target.append(copy.deepcopy(enter_pose))
+        points_to_target.append(copy.deepcopy(target_pose))
+
+        # Move
+        # Move the arm to exit and then to rest pose
+        for i, point in enumerate(points_to_target):
+            fraction = 0
+            attempts = 0
+            waypoints = []
+            waypoints.append(copy.deepcopy(point))
+            while fraction < 1.0 and attempts < self._max_attempts:
+                (plan, fraction) = self._move_group.compute_cartesian_path(
+                    waypoints,                # way points
+                    self._plan_step_length,          # step length
+                    0.0,                             # disable jump
+                    True                             # enable avoid_collision
+                    )
+                attempts += 1
+
+            if fraction == 1.0:
+                rospy.loginfo('Path computed successfully, moving robot')
+                self._move_group.execute(plan)
+                self._move_group.stop()
+                self._move_group.clear_pose_targets()
+                rospy.loginfo('Path execution completed')
+                move_result = True
+            else:
+                rospy.loginfo('Action failed')
+                move_result = False
+                break
+        else:
+            move_result = True
+            rospy.loginfo('Action success')
+
+        rospy.loginfo('(upright path) Action finished, action result' + str(move_result))
+        return move_result
+
+    def move_current_to_home_via_exit(self, via_up=True, last_gripper_action='pick'):
+        '''This functions moves the arm from its current (pick or place) position to home pose 
+        via an exit waypoint directly above the pick pose 
+        - Usually executed after pick operation or after a failed pick operation
+        '''
+        # create exit waypoint
+        points_to_target = []
+        current_pose = self._move_group.get_current_pose(self._end_effector).pose
+        exit_pose = copy.deepcopy(current_pose)
+        exit_pose.position.z += self._up1
+        points_to_target.append(copy.deepcopy(exit_pose))
+
+        # Move the arm to exit and then to rest pose
+        for i, point in enumerate(points_to_target):
+            fraction = 0
+            attempts = 0
+            waypoints = []
+            waypoints.append(copy.deepcopy(point))
+            while fraction < 1.0 and attempts < self._max_attempts:
+                (plan, fraction) = self._move_group.compute_cartesian_path(
+                    waypoints,                # way points
+                    self._plan_step_length,          # step length
+                    0.0,                             # disable jump
+                    True                             # enable avoid_collision
+                    )
+                attempts += 1
+
+            if fraction == 1.0:
+                rospy.loginfo('Path computed successfully, moving robot')
+                self._move_group.execute(plan)
+                self._move_group.stop()
+                self._move_group.clear_pose_targets()
+                rospy.loginfo('Path execution completed')
+                move_result = True
+            else:
+                rospy.loginfo('Action failed')
+                move_result = False
+                break
+
+            # Finally move to rest pose from exit point
+            self.to_rest_pose()
+        else:
+            move_result = True
+            rospy.loginfo('Action success')
+
+        rospy.loginfo('(upright path) Action finished, action result' + str(move_result))
+        return move_result
     
     # generate cartesian straight path
     def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action='pick'):

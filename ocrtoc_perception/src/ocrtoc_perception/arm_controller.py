@@ -4,6 +4,8 @@ import copy
 from trajectory_msgs.msg import JointTrajectory, JointTrajectoryPoint
 from ocrtoc_common.srv import JointSpaceGoalRequest, JointSpaceGoal
 
+
+
 class ArmController(object):
     def __init__(self, topic = 'arm_controller/command'):
         # Init action.
@@ -25,3 +27,7 @@ class ArmController(object):
             rospy.loginfo('Finish joint space goal:{}'.format(request.joint_goal))
         except rospy.ServiceException as e:
             rospy.logwarn("Service call failed: %s"%e)
+
+
+
+

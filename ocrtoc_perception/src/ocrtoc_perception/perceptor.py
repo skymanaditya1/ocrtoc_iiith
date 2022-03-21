@@ -1,6 +1,7 @@
 # Author: Minghao Gou
 #! /usr/bin/env python
 import numpy as np
+np.set_printoptions(suppress=True)
 import cv2
 from numpy.core.numeric import full
 import rospy
@@ -231,10 +232,12 @@ class Perceptor():
                 arm_poses = self.fixed_arm_poses
             else:
                 arm_poses = np.array(self.fixed_arm_poses_both).tolist()
-            for arm_pose in arm_poses:
+            for j, arm_pose in enumerate(arm_poses):
                 self.arm_controller.exec_joint_goal(arm_pose)
                 rospy.sleep(2.0)
                 time.sleep(1.0)
+                # if j not in self.config['reconstruction']['both_camera_order']:
+                #     continue
                 color_image = self.get_color_image()
                 color_image = cv2.cvtColor(color_image, cv2.COLOR_RGBA2RGB)
                 if self.debug:
@@ -546,6 +549,10 @@ class Perceptor():
         
         ts = gg.translations
         scores = gg.scores
+        print("here are the scores for all the grasps, now decide for yourself.")
+        print(scores)
+        # assert False
+
         depths = gg.depths
         rs = gg.rotation_matrices
         
@@ -563,7 +570,16 @@ class Perceptor():
             object_pose = object_poses[object_name]
             
             dists = np.linalg.norm(ts - object_pose['pose'][:3, 3], axis = 1)
-            object_mask = dists < dist_thresh
+
+            print("ts shape", ts.shape)
+            print("object_pose['pose'][:3, 3]", object_pose['pose'][:3, 3].shape)
+
+
+            print(ts)
+
+            # assert False
+
+            object_mask = np.logical_and(dists < dist_thresh, ts[:, 2] < 0.2)
             
             print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
             
@@ -579,9 +595,9 @@ class Perceptor():
             
             object_mask = min_object_ids[i]
             
-            if np.sum(object_mask) == 0:
-                grasp_poses[object_name] = None
-                continue
+            # if np.sum(object_mask) == 0:
+            #     grasp_poses[object_name] = None
+            #     continue
             
             i_gg = gg[object_mask]
             i_scores = scores[object_mask]
@@ -591,8 +607,12 @@ class Perceptor():
             # next, we only pick the grasp poses sorted according to 
             # the confidence threshold. We only pick the top n poses.
             
-            n = 100
-            
+            n = 5
+            i_scores = i_scores[i_scores > 0.25]
+            if len(i_scores) == 0:
+                grasp_poses[object_name] = None
+                continue
+
             top_indices = (-i_scores).argsort()[:n]
             top_i_gg = i_gg[top_indices]
             top_i_eelink_rs = i_eelink_rs[top_indices]
@@ -601,6 +621,10 @@ class Perceptor():
             top_i_euler = np.array([self.rotationMatrixToEulerAngles(r) for r in top_i_eelink_rs])
             print('Top Eulers shape', top_i_euler.shape)
             
+            print("i scores")
+            print(i_scores)
+            print("======")
+
             # next, we want the poses with the lowest gravitional angle
             # we convert to euler, ideal is np.pi, 0. We sort according
             # to the norm and then take the minimum of all the angls.

@@ -12,6 +12,7 @@ import argparse
 import copy
 import math
 from platform import node
+from turtle import done
 from unicodedata import name
 import numpy as np
 import transforms3d
@@ -44,6 +45,84 @@ import open3d as o3d
 from ocrtoc_common.camera_interface import CameraInterface
 # from ocrtoc_common.transform_interface import TransformInterface
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
+
+# Stacking related functions
+class SGNode:
+    def __init__(self, object_name, mesh_id, parents):
+        '''
+        object_name: Current object name
+        parents: Parents' node ids
+        '''
+        self.object = object_name
+        self.mesh_id = mesh_id
+        self.parents = parents
+
+def get_a_graph_from_obj_dict(object_stacks):
+    '''
+    Parameters:
+    object_stacks: {
+        'mesh_id': {
+            'current_object_info': {
+                'object': <object_label>,
+                'mesh_id': <object_mesh_id>
+            },
+            'mesh_ids_of_objects_under_it': [i, j, ...]
+        }
+    }
+
+    Return:
+    stacks: list of stacks = [[stack_1 mesh ids (left to right ids indicate bottom to top in the stack)], 
+                                [stack 2], ...etc]
+    '''
+    stacks = []
+    # nodes = []
+    node_dict = {}
+    for i, key in enumerate(object_stacks):
+        # Here key == mesh_id of the object
+        obj_name = object_stacks[key]['current_object_info']['object']
+        mesh_id = key
+        parents = object_stacks[key]['mesh_ids_of_objects_under_it']
+        node = SGNode(obj_name, mesh_id, parents)   
+        node_dict[key] = node
+
+    # Detect and break cycles in the obtained graph
+    for i, key in enumerate(node_dict):
+        # Run bfs based cycle-detection
+        visited = np.zeros(len(node_dict.keys()))
+        # print(visited)
+        head = node_dict[key]
+        # print("Node type: {}, mesh id type: {}".format(type(head), int(head.mesh_id)))
+        to_visit_list = []
+        # print(i)
+        while head != None:
+            # print(i)
+            # print(i, int(head.mesh_id))
+            visited[int(head.mesh_id)] = 1
+            cycle_parents = []
+            for parent in head.parents:
+                if visited[int(parent)] == 1:
+                    # Found a cycle
+                    # Break the cycle by removing the parent from the parent list
+                    cycle_parents.append(parent)
+                to_visit_list.append(parent)
+            for parent in cycle_parents:
+                head.parents.remove(parent)
+                if parent in to_visit_list:
+                    to_visit_list.remove(parent)
+
+            if len(to_visit_list)!=0:
+                # print(type(to_visit_list[0]))
+                head = node_dict[str(to_visit_list[0])]
+                to_visit_list.pop(0) 
+            else:
+                break
+
+    # Print the obtained tree after removing all the cycles in the given graph
+    print("\nPrinting the modified trees:\n")
+    for i, key in enumerate(node_dict):
+        print("Object_name: {}\tMesh_id: {}\tParent_list: {}".format(node_dict[key].object, node_dict[key].mesh_id, node_dict[key].parents))      
+
+    return node_dict  
 
 
 # Miscellineous functions class - contains functions from https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py 
@@ -168,8 +247,8 @@ class OccupancyAndBuffer:
                 if pixel_counts[i, j] >= threshold:
                     occ_map[i, j] = 1 # Occupied
 
-        import cv2
-        cv2.imwrite(dir_path,(occ_map * 255).astype(np.uint8))
+        # import cv2
+        # cv2.imwrite(dir_path,(occ_map * 255).astype(np.uint8))
         # cv2.imshow('Occupancy map', (occ_map * 255).astype(np.uint8))
         # cv2.waitKey(0)
 
@@ -207,6 +286,8 @@ class OccupancyAndBuffer:
         entity_pcd = entity.render_to_pose_and_get_pcd(object_pose=target_pose_6D)
         entity_omap = self.generate_2D_occupancy_map(world_dat = np.asarray(entity_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120,
                                                      threshold=1, dir_path='./results/object_{}-{}.png'.format('2-2-2', 'green_bowl'), save=False) # xy_min_max=[-30, 30, -60, 60], 
+        # cv2.imshow('Occupancy map', (scene_omap * 255).astype(np.uint8))
+        # cv2.waitKey(0)
         if len(entity_omap) == 0:
             return 100
         occupancy = np.logical_and(scene_omap, entity_omap)
@@ -356,8 +437,8 @@ class RedBlackNode:
         self.target_black = []
         self.done = False
         self.occupied = False
-        self.prev_node_in_stack = None
-        self.next_node_in_stack = None
+        self.prev_node_in_stack = []
+        self.next_node_in_stack = []
         self.pose = None
         self.pick_grasp_pose = None
         self.place_grasp_pose = None
@@ -467,6 +548,7 @@ class TaskPlanner(object):
         
         self.block_labels = blocks
         self.object_label_mesh_path_dict = {}
+        self.duplicate_object_real_label_dict = {}
         self.object_goal_pose_dict = self.get_goal_pose_dict(self.block_labels, goal_cartesian_poses)
         self.block_labels_with_duplicates = self.object_goal_pose_dict.keys()
         
@@ -476,6 +558,8 @@ class TaskPlanner(object):
         self.detected_object_label_list = []
         self.red_nodes = []
         self.black_nodes = []
+        self.object_stacks = None
+        self.red_node_dict = {}
         
         print("#"*40)
         print("Block labels: {}".format(self.block_labels))
@@ -510,6 +594,7 @@ class TaskPlanner(object):
             for i, pose in enumerate(poses.poses):
                 goal_pose_dict["{}_v{}".format(label, i)] = pose
                 self.object_label_mesh_path_dict["{}_v{}".format(label, i)] = '/root/ocrtoc_ws/src/ocrtoc_materials/models/{}/textured.obj'.format(label)
+                self.duplicate_object_real_label_dict["{}_v{}".format(label, i)] = label
             # goal_pose_dict[label] = pose
         return goal_pose_dict    
 
@@ -708,19 +793,32 @@ class TaskPlanner(object):
             black_nodes.append(bnode)
         return black_nodes
     
-    def initialize_initial_red_nodes(self, object_name_list):
+    def initialize_initial_red_nodes(self, object_name_list, object_stack_dict):
         '''
         Initializes the red nodes but does not add any pose information (as it is not collected yet)
         
         Returns:
-        A list of red nodes (without pose information)
+        # A list of red nodes (without pose information)
+        dictionary of red nodes
+        red_node_dict = {
+            <object_name_with_duplicate_suffix>: node
+        }
         '''
-        red_nodes = []
+        # red_nodes = []
+        red_node_dict = {}
         for object_name in object_name_list:
             rnode = RedBlackNode(name=object_name, node_type='r')
             rnode.target_black = [self.find_target_black_node(self.object_goal_pose_dict[rnode.object])]
-            red_nodes.append(rnode)
-        return red_nodes
+            rnode.prev_node_in_stack = []
+            for parent in object_stack_dict[object_name]['objects_under_it']:
+                rnode.prev_node_in_stack.append(parent)
+            # rnode.prev_node_in_stack.append()
+            red_node_dict[object_name] = rnode
+            # red_nodes.append(rnode)
+        for i, key in red_node_dict:
+            for parent in red_node_dict[key].prev_node_in_stack:
+                red_node_dict[parent].next_node_in_stack.append(key)
+        return red_node_dict
 
 
     def update_red_nodes(self, detected_object_label_list, done_object_labels):
@@ -730,7 +828,8 @@ class TaskPlanner(object):
         Returns:
         None
         '''
-        for node in self.red_nodes:
+        for i, key in self.red_node_dict:
+            node = self.red_node_dict[key]
             if node.object in detected_object_label_list:
                 print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
                 if node.done == True or node.type == 'b':
@@ -905,11 +1004,40 @@ class TaskPlanner(object):
         if self.search_strings(left_object_labels, searchable='clear_box'):
             self.clear_box_flag = True
             print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
+
+        # 1. Get target scene stack information
+        # 1.1 Generate the object stack information
+        object_dict = {}
+        for i, key in enumerate(self.object_goal_pose_dict):
+            position = self.object_goal_pose_dict[key].position
+            p = [position.x, position.y, position.z]
+            orientation = self.object_goal_pose_dict[key].orientation
+            o = [orientation.w, orientation.x, orientation.y, orientation.z]
+            posep = []
+            for pi in p:
+                posep.append(pi)
+            for oi in o:
+                posep.append(oi)
+            object_dict[key] = {
+                'object_label': self.duplicate_object_real_label_dict[key],
+                'pose': posep
+            }
+        OBJECT_DIR_PATH = '/root/ocrtoc_ws/src/stack_detection/object_dict.npz'
+        MESH_DIR = '/root/ocrtoc_ws/src/ocrtoc_materials/models/'
+        SAVE_PATH = '/root/ocrtoc_ws/src/stack_detection/scene_dict.npz' 
+        np.savez_compressed(OBJECT_DIR_PATH, data=object_dict)
+        print("Running stack detection")
+        command = '/root/ocrtoc_ws/src/stack_detection/run_script.sh {} {} {}'.format(OBJECT_DIR_PATH, MESH_DIR, SAVE_PATH)
+        os.system(command)
+        # 1.1. Load the dictionary and convert it into object stack dictionary 
+        self.object_stacks = np.load(SAVE_PATH, allow_pickle=True)['data'].item()
             
-        # 1. Create black nodes for target poses
+        # 2. Create black nodes for target poses
         self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
-        # 2. Create red nodes for initial poses
-        self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
+        # 3. Create red nodes for initial poses
+        self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates, self.object_stacks)
+
+
             
         count = 3
         while len(left_object_labels) > 0 and count > 0:
@@ -957,22 +1085,33 @@ class TaskPlanner(object):
                 temp.append(object)
             left_object_labels = temp
             print("left objects: {}".format(left_object_labels))
+
+            self._motion_planner.to_rest_pose()
             
             
             
-    def find_red_node(self, node_list):
-        for node in node_list:
-            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.target_black[0].occupied == False and node.pickable==True:
-                if node.target_black[0].prev_node_in_stack == None:
-                    # print("yes {}".format(node.name))
-                    return node
-                else:
-                    if node.target_black[0].prev_node_in_stack.done == True:
+    def find_red_node(self):
+        for i, key in self.red_node_dict:
+            node = self.red_node_dict[key]
+            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.pickable==True:
+                parents_done = True
+                for parent in node.prev_node_in_stack:
+                    if self.red_node_dict[parent].done == False:
+                        parents_done = False
+                if parents_done == False:
+                    continue
+
+                if node.target_black[0].occupied == True:
+                    if len(node.prev_node_in_stack) == 0:
+                       continue 
+                    else:
                         return node
+                return node
         return None
 
-    def just_find_red(self, node_list):
-        for node in node_list:
+    def just_find_red(self):
+        for i, key in self.red_node_dict:
+            node = self.red_node_dict[key]
             if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True:
                 return node
         return None
@@ -987,22 +1126,28 @@ class TaskPlanner(object):
             print("No occupancy map recieved, no buffer spots will be generated")
         sequence = []
         done = False
-        nodes = self.red_nodes
+        # nodes = self.red_nodes
         # head = self.find_red_node(nodes)
-        counter = 3
+        counter = 5
         while (not done) and counter > 0:
             current_pcd = self.get_point_cloud_from_kinect()
             print("Total number of points in pcd: {}".format(len(current_pcd.points)))
             occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
             self.update_black_nodes(current_pcd, occ_map)
             
-            head = self.find_red_node(nodes)
+            head = self.find_red_node()
+
+            print(head)
+            print("Object is going to be placed in buffer?")
+            # from time import sleep
+            # sleep(2)
             
             if head == None:
+                print("Object is going to be placed in buffer!! yep!")
                 # if len(occ_map) == 0:
                 #     done = True
                 #     continue
-                head = self.just_find_red(nodes)
+                head = self.just_find_red()
                 if head == None:
                     done = True
                     continue
@@ -1012,16 +1157,16 @@ class TaskPlanner(object):
                 if res==False:
                     head.pickable = False
                     self._motion_planner.place()
+                    self._motion_planner.move_current_to_home_via_exit()
                     continue
                 
-                
-                buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
-                buffer.occupied = copy.deepcopy(head.occupied)
-                buffer.target_black = [head.target_black[0]]
-                buffer.done = False
+                # buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
+                # buffer.occupied = copy.deepcopy(head.occupied)
+                # buffer.target_black = [head.target_black[0]]
+                # buffer.done = False
                 # buffer.attached_red_nodes= head.attached_red_nodes
-                head.done = True
-                head.type = 'b'
+                # head.done = True
+                # head.type = 'b'
                 print(occ_map)
                 # target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y])
                 target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y, head.target_black[0].pose.position.z,
@@ -1034,29 +1179,38 @@ class TaskPlanner(object):
                 buffer_pose = copy.deepcopy(self.object_init_pose_dict[head.object])
                 buffer_pose.position.x = buffer_spot_2d[0]
                 buffer_pose.position.y = buffer_spot_2d[1]
-                buffer.pickable = False
+                head.pickable = False
                 
                 # Pick and place in buffer
                 print("Generated buffer. Now, pick and place the object in buffer spot!")
                 # res = self.go_pick_object(object_name=head.object)
                 # if res == True:
-                self.go_place_object(object_name=head.object, final_place_pose=buffer_pose)
+                # self._motion_planner.
+                self.go_place_object(object_name=head.object, final_place_pose=buffer_pose, current_place='home')
                 print("Placed in buffer!")
                 # import time
                 # time.sleep(1)
                 # rospy.sleep(1)
                 
                 sequence.append(head.name)
-                sequence.append(buffer.name)
-                buffer.prev_node_in_stack = head.prev_node_in_stack
-                buffer.next_node_in_stack = head.next_node_in_stack
-                if head.next_node_in_stack != None:
-                    head.next_node_in_stack.prev_node_in_stack = buffer
-                if head.prev_node_in_stack != None:
-                    head.prev_node_in_stack.next_node_in_stack = buffer
+                sequence.append('{}_buffer'.format(head.name))
+                # head.name = '{}_buffer'.format(head.name)
+                head.done = True
+                head.type = 'b'
+                head.target_black[0].done = True
+                completed_objects.append(head.object)
+                # for k, key in self.red_node_dict:
+                    # if key in head.next_node_in_stack:
+                        # self.red_node_dict[key].prev_node_in_stack.remove(head.object)
+                # buffer.prev_node_in_stack = head.prev_node_in_stack
+                # buffer.next_node_in_stack = head.next_node_in_stack
+                # if head.next_node_in_stack != None:
+                #     head.next_node_in_stack.prev_node_in_stack = buffer
+                # if head.prev_node_in_stack != None:
+                #     head.prev_node_in_stack.next_node_in_stack = buffer
 
                 # head = self.find_red_node(nodes)
-                nodes.append(buffer)
+                # nodes.append(buffer)
                 # self.red_nodes.append(buffer)
                 # nodes_labelled.append((buffer, 0))
                 print("*************************++++++++**************************\nSequence: {}".format(sequence))
@@ -1083,8 +1237,8 @@ class TaskPlanner(object):
             
         print('Sequence: {}'.format(sequence))  
         print("Completed objects: {}".format(completed_objects))
-        print(" red nodes: {}".format(self.red_nodes))
-        print("Nodes: {}".format(nodes))
+        print(" red node dict: {}".format(self.red_node_dict))
+        # print("Nodes: {}".format(nodes))
         return completed_objects
 
     def go_pick_object(self, object_name):
@@ -1119,12 +1273,13 @@ class TaskPlanner(object):
         is_picked = self.gripper_width_test()
         return is_picked
         
-        
-        
-    def go_place_object(self, object_name, final_place_pose = None):
+    def go_place_object(self, object_name, final_place_pose = None, current_place='not_home'):
         '''
         This function assumes that the arm is in it's pick pose. It first moves to pre-place waypoint directly above the place 
         pose. Then drop the object 
+
+        Parameters:
+        current_place = 'home' or 'not_home' (if 'home', then move from home to place pose, otherwise move from current to home to place pose)
 
         Returns:
         is_placed: boolean - If true, the object is successfully placed
@@ -1147,7 +1302,10 @@ class TaskPlanner(object):
                 
         grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
                 
-        plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action='pick')
+        if current_place == 'not_home':        
+            plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action='pick')
+        else:
+            plan_result = self._motion_planner.move_home_to_target_via_entry(grasp_pose, last_gripper_action='pick')
         rospy.sleep(1.0)
         
         is_placed = plan_result
