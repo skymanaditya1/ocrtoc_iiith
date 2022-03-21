@@ -259,6 +259,8 @@ class MotionPlanner(object):
                 
                 # save the scene image to the directory
                 scene_filename = random_path + '.jpg'
+                # print(f'Scene filename : {scene_filename}')
+                print('scene_filename', scene_filename)
                 
                 
                 scene_dir = os.path.join(BASE_DIR, 'scenes')
@@ -267,12 +269,13 @@ class MotionPlanner(object):
                 
                 # get the target images from the pyyaml file based on the objects                
                 scene_image_path = os.path.join(scene_dir, scene_filename)
+                # return scene_image[:200, 500:800]
                 cv2.imwrite(scene_image_path, image)
                 
                 target_objects_path = '/root/ocrtoc_ws/src/ocrtoc_perception/src/ocrtoc_perception/pose/rendered_object_images'
                 
                 target_objects = list() # list of target object filepaths - take the 000001.png
-                all_objects = glob(target_objects_path + '/*')
+                # all_objects = glob(target_objects_path + '/*')
                 
                 for target_object in target_object_list.keys():
                     target_object = target_object.rsplit('_', 1)[0]
@@ -283,24 +286,35 @@ class MotionPlanner(object):
                     if os.path.exists(inter_object_path):
                         target_objects.append(inter_object_path)
                     
-                target_object_string = ';'.join(target_object for target_object in target_objects)
+                target_object_string = ':'.join(target_object for target_object in target_objects)
                 
                 
-                print("!!!!!!!!!!!!!!")
-                print("target object string", target_object_string)
-                target_images_dir = os.path.join(os.path.join(BASE_DIR, 'target_images'), random_path)
-                # os.makedirs(target_images_dir, exists_ok=True)
-                Path(target_images_dir).mkdir(exist_ok=True, parents=True)
+                
+                
+                
+                
+                # print("!!!!!!!!!!!!!!")
+                # print("target object string", target_object_string)
+                
+                # target_images_dir_path = os.path.join(os.path.join(BASE_DIR, 'target_images'), random_path)
+                
+                # # os.makedirs(target_images_dir, exists_ok=True)
+                # Path(target_images_dir_path).mkdir(exist_ok=True, parents=True)
                 
                 # target_images_dir = os.path.join(target_images_dir, random_path)
                 
-                command = '/root/ocrtoc_ws/src/ocrtoc_planning/scripts/run_mmdetection_segmentation.sh {} {} {}' \
-                    .format(scene_image_path, target_object_string, target_images_dir)
+                # the full target dir path is reconstructed inside the function 
+                command = '/root/ocrtoc_ws/src/ocrtoc_planning/scripts/run_mmdetection_segmentation.sh {} {} {}'.format(scene_image_path, target_object_string, random_path)
                 
                 print('Running object image segmentation')
                 os.system(command)
-                                    
+                
+                                                  
                 # run the object instance segmentation on the image and get the matched object
+                
+                #Call superglue and check which image it matches with amongst the other objects
+                obj = check_match_superglue(saved_dir)
+                
                 
                 # kinect_image = image
             
