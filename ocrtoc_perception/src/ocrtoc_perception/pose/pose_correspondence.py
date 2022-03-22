@@ -96,7 +96,7 @@ def compute_pose(matching, renderer, obj_list, image, camera_Twc, model_suffix, 
 
         raw_mesh = trimesh.load(raw_mesh_path)
 
-        for template_id in range(0, len(renderer.views), 2):
+        for template_id in range(0, len(renderer.views), 3):
             template_name = io_interface.get_view_name(template_id)
 
             base_dir = os.path.join(rendered_object_dir, object_name+model_suffix)
@@ -204,7 +204,10 @@ def get_pose_superglue(obj_list, images, camera_poses, camera_matrix, superglue_
     for obj in obj_list:
         pose_ret[obj] = (0, None)
 
-    for image, camera_pose in zip(images, camera_poses):
+    for i, (image, camera_pose) in enumerate(zip(images, camera_poses)):
+        
+        if i in [2,3]:
+            continue
         # print("Image resolution: {}".format(image.shape))
         # image = cv2.resize(image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_CUBIC)
         # print("Image res after resizing: {}".format(image.shape))

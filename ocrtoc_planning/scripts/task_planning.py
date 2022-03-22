@@ -15,6 +15,7 @@ from platform import node
 from turtle import done
 from unicodedata import name
 import numpy as np
+# from torch import true_divide
 import transforms3d
 import os
 import yaml
@@ -1065,6 +1066,7 @@ class TaskPlanner(object):
                 obj_init_pose = np.array([i_p.x, i_p.y, i_p.z])
                 if np.linalg.norm(obj_goal_pose - obj_init_pose) < 0.05:
                     done_object_labels.append(label)
+                    self.red_node_dict[label].done = True
                     
             # for node in self.red_nodes:
                 
@@ -1103,7 +1105,7 @@ class TaskPlanner(object):
         for i, key in enumerate(self.red_node_dict.keys()):
             print(key)
             node = self.red_node_dict[key]
-            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.pickable==True:
+            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.pickable==True and node.done == False:
                 parents_done = True
                 for parent in node.prev_node_in_stack:
                     if self.red_node_dict[parent].done == False:
@@ -1123,7 +1125,7 @@ class TaskPlanner(object):
         for i, key in enumerate(self.red_node_dict.keys()):
             print(key)
             node = self.red_node_dict[key]
-            if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True:
+            if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True and node.done == False:
                 return node
         return None
 

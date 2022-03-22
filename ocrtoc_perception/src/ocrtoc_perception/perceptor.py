@@ -607,11 +607,18 @@ class Perceptor():
             # next, we only pick the grasp poses sorted according to 
             # the confidence threshold. We only pick the top n poses.
             
-            n = 5
-            i_scores = i_scores[i_scores > 0.25]
-            if len(i_scores) == 0:
+            n = 100
+            
+            correct_indices = i_scores > 0.25
+            
+            if correct_indices.sum() == 0:
                 grasp_poses[object_name] = None
                 continue
+            
+            i_scores = i_scores[correct_indices]
+            i_gg = i_gg[correct_indices]
+            i_ts = i_ts[correct_indices]
+            i_eelink_rs = i_eelink_rs[correct_indices]
 
             top_indices = (-i_scores).argsort()[:n]
             top_i_gg = i_gg[top_indices]

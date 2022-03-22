@@ -136,9 +136,6 @@ class MotionPlanner(object):
         
         self.to_rest_pose()
         
-        
-
-
     # move to specified home pose
     def to_home_pose(self):
         self._move_group.set_joint_value_target(self._home_joints)
@@ -157,29 +154,8 @@ class MotionPlanner(object):
 
     # move to specified home pose
     def to_rest_pose(self):
-        
-# ('rest pose x,y,z: ', position: 
-#   x: -0.112957249941
-#   y: 2.9801544038e-05
-#   z: 0.590340135745
-# orientation: 
-#   x: -0.923949504923
-#   y: 0.382514458771
-#   z: -3.05585242637e-05
-#   w: 1.57706453844e-05)
-
-# ('rest pose x,y,z: ', position: 
-#   x: -0.112941989314
-#   y: 3.41328147894e-05
-#   z: 0.59039232584
-# orientation: 
-#   x: 0.923962395658
-#   y: -0.382483316194
-#   z: -6.25240426226e-05
-#   w: 1.82797910597e-05)
 
         rest_pose = Pose()
-        
         rest_pose.position.x = -0.112957249941
         rest_pose.position.y = 2.9801544038e-05
         rest_pose.position.z = 0.590340135745
