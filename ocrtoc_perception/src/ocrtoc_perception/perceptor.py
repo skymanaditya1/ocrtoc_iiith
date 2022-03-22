@@ -5,6 +5,7 @@ import cv2
 from numpy.core.numeric import full
 import rospy
 import rospkg
+import torch
 
 # import tf.transformations
 
@@ -158,6 +159,9 @@ class Perceptor():
             delimiter = ','
         )
 
+
+    
+
     def get_color_image(self):
         return self.camera_interface.get_numpy_image_with_encoding(self.color_topic_name)[0]
     
@@ -288,6 +292,9 @@ class Perceptor():
         
 
         return full_pcd, color_images, camera_poses
+
+    def get_config(self):
+        return self.config['superglue']
 
     def compute_6d_pose(self, full_pcd, color_images, camera_poses, pose_method, object_list):
         camK = self.get_color_camK()

@@ -1,4 +1,11 @@
 # license
+#! /usr/bin/env python3
+
+from re import S
+import sys
+sys.path.append("SuperGluePretrainedNetwork")
+
+
 import copy
 from math import pi
 from tokenize import group
@@ -24,6 +31,7 @@ import time
 from cv_bridge import CvBridge
 from sensor_msgs.msg import Image
 from ocrtoc_common.transform_interface import TransformInterface
+
 
 try:
   from pathlib import Path
@@ -109,10 +117,6 @@ class MotionPlanner(object):
         self.place()
         rospy.sleep(1.0)
 
-         
-        
-
-
     # move to specified home pose
     def to_home_pose(self):
         self._move_group.set_joint_value_target(self._home_joints)
@@ -131,8 +135,6 @@ class MotionPlanner(object):
 
     # move to specified home pose
     def to_rest_pose(self):
-
-
         rest_pose = Pose()
         
         rest_pose.position.x = -0.112957249941
@@ -209,6 +211,159 @@ class MotionPlanner(object):
 
         rospy.loginfo('move from home pose result' + str(from_home_result))
         return from_home_result
+    
+    def get_best_object_match_using_superglue(self, image, target_object_list):
+        # THIS CODE IS NOT WORKING OUT.
+        # THE FOLLOWING PART IF WE WANT TO MATCH THE SCENE IMAGES WITH THE RENDERED OBJECT USING SUPERGLUE.
+        # Call superglue and check which image it matches with amongst the other objects
+        
+        save_sample_segmented_path = '/root/ocrtoc_ws/src/segmented_image_sample_' + str(random.randint(0, 1000)) + '.jpg'
+        cv2.imwrite(save_sample_segmented_path, rest_pose_image)
+        
+        print('Sampel segmented image saved at:', save_sample_segmented_path)
+        
+        rest_pose_image = image[:200, 472:828]
+        
+        PATH, OUTPATH = '/root/ocrtoc_ws/src/random1.npz', '/root/ocrtoc_ws/src/random2.npz'
+        data = {
+            'image': rest_pose_image, 
+            'target_object_list': target_object_list
+        }
+        
+        np.savez_compressed(PATH, data=data)
+            
+        os.system("python3 /root/ocrtoc_ws/src/ocrtoc_planning/scripts/superglue_interface.py {} {}".format(PATH, OUTPATH))
+        
+        obj = np.load(OUTPATH, allow_pickle=True)['data'].item().encode("utf")
+        print("finalized object is", obj)
+        
+        return obj
+    
+    def divide_colors_into_buckets(self, pixels):
+        # buckets: 17 colors in one bucket.
+        jump = 17
+        bucket_ = np.zeros((17, 17, 17))
+        max_sum = 0
+        for i in range(0, 255, jump):
+            for j in range(0, 255, jump):
+                for k in range(0, 255, jump):
+                    bucket_mask = (pixels[:, 0] > i) * (pixels[:, 0] < i+jump) * (pixels[:, 1] > j) * (pixels[:, 1] < j+jump) * (pixels[:, 2] > k) * (pixels[:, 2] < k+jump)
+                    
+                    bucket_[i//jump, j//jump, k//jump] = bucket_mask.sum()
+                    max_sum = max(max_sum, bucket_mask.sum())
+                
+        return bucket_ / max_sum
+        
+        # bucket_ = np.zeros((jump, 3))
+        # max_sum
+        
+        # for i in range(0, 255, jump):
+        #     for j in [0, 1, 2]:
+        #         bucket_mask = np.logical_and(pixels[:, j] > i, pixels[:, j] < i+jump)
+                
+        #         bucket_[i//jump, j] = bucket_mask.sum()
+        #         max_sum = max(max_sum, bucket_mask.sum())
+                
+        # return bucket_ / max_sum
+    
+    def find_best_matches_from_color_distributions(self, segmented_scene_image_dir, target_images_paths):
+        most_similar, closest_match_score = target_images_paths[0], 9999
+        
+        scene_image = cv2.cvtColor(cv2.imread(glob(segmented_scene_image_dir+'/*.jpg')[0]), cv2.COLOR_BGR2RGB)
+        
+        flattened_non_black_pixels_in_scene = np.any(scene_image != [0, 0, 0], axis=-1).reshape(-1)
+        flattened_scene_image = scene_image.reshape(-1, 3)
+        
+        non_black_pixels_in_scene = flattened_scene_image[flattened_non_black_pixels_in_scene]
+        
+        # color_mean_scene = non_black_pixels_in_scene.mean(0)
+        color_bucket_scene = self.divide_colors_into_buckets(non_black_pixels_in_scene)
+        
+        for target_image_path in target_images_paths:
+            target_image = cv2.cvtColor(cv2.imread(target_image_path), cv2.COLOR_BGR2RGB)
+            
+            flattened_non_white_pixels_in_target_mask = np.any(target_image != [255, 255, 255], axis=-1).reshape(-1)
+            flattened_target_image = target_image.reshape(-1, 3)
+            
+            non_white_pixels_in_target = flattened_target_image[flattened_non_white_pixels_in_target_mask]
+            
+            color_mean_target = non_white_pixels_in_target.mean(0)
+            
+            color_bucket_target = self.divide_colors_into_buckets(non_white_pixels_in_target)
+            
+            # match_score = abs(color_mean_target - color_mean_scene).mean()
+            match_score = abs(color_bucket_scene - color_bucket_target).mean()
+            
+            print('Match score with {} is: {}'.format(target_image_path, match_score))
+            
+            if match_score < closest_match_score:
+                most_similar = target_image_path
+                
+                closest_match_score = match_score
+                
+        print('Found the closest match: {} with a matching score of {}'.format(most_similar, closest_match_score))
+        
+        return most_similar, closest_match_score
+            
+    def get_best_object_match_using_color_distribution(self, image, target_object_list):
+        def get_random_name(CHAR_LEN=5):
+            chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
+            return ''.join([chars[random.randint(0, len(chars)-1)] for i in range(CHAR_LEN)])
+        
+        def get_all_paths():
+            BASE_DIR = '/root/ocrtoc_ws/src/image_seg'
+            
+            random_path = get_random_name()
+            
+            scene_dir = os.path.join(BASE_DIR, 'scenes')
+            scene_image_path = os.path.join(scene_dir, random_path + '.jpg')
+            
+            # get the target images from the pyyaml file based on the objects 
+            target_objects_path = '/root/ocrtoc_ws/src/ocrtoc_perception/src/ocrtoc_perception/pose/rendered_object_images'
+
+            intermediate_images_dir = os.path.join(os.path.join(BASE_DIR, 'saved_segments'), random_path)
+            target_images_dir = os.path.join(os.path.join(BASE_DIR, 'target_images'), random_path)
+            
+            Path(scene_dir).mkdir(exist_ok=True, parents=True)
+            Path(intermediate_images_dir).mkdir(exist_ok=True, parents=True)
+            Path(target_images_dir).mkdir(exist_ok=True, parents=True)
+        
+            return scene_image_path, target_objects_path, intermediate_images_dir, target_images_dir
+        
+        scene_image_path, target_objects_path, intermediate_images_dir, target_images_dir = get_all_paths()
+        
+        print('Saving the sample image (before split) at:', scene_image_path)
+        cv2.imwrite(scene_image_path, image)
+                
+        target_objects_paths = [] # list of target object filepaths - take the 000001.png
+        
+        for target_object in target_object_list.keys():
+            target_object = target_object.rsplit('_', 1)[0]
+            target_object += '720_1280'
+            
+            inter_object_path = os.path.join(os.path.join(target_objects_path, target_object), '000001.png')
+            print("inter_object_path", inter_object_path)
+            
+            if os.path.exists(inter_object_path):
+                target_objects_paths.append(inter_object_path)
+            
+        target_objects_paths_string = ':'.join(target_object_path for target_object_path in target_objects_paths)
+        
+        print("!"*60)
+        print("target object string", target_objects_paths_string)
+        print("!"*60)
+        
+        # the full target dir path is reconstructed inside the function 
+        command = '/root/ocrtoc_ws/src/ocrtoc_planning/scripts/run_mmdetection_segmentation.sh {} {} {} {}'\
+            .format(scene_image_path, target_objects_paths_string, intermediate_images_dir, target_images_dir)
+        
+        print('Running object image segmentation')
+        os.system(command)
+        
+        selected_obj_path, match_score = self.find_best_matches_from_color_distributions(target_images_dir, target_objects_paths)
+        
+        # convert path to name and then send the object back.
+        return selected_obj_path, match_score
 
     # generate cartesian straight path
     # target object list is a dictionary of leftover objects
@@ -233,13 +388,11 @@ class MotionPlanner(object):
 
         points_to_target = self.get_points_to_target_upright(group_goal)
         for i, point in enumerate(points_to_target):
-        
             if i==1 and last_gripper_action=='place':
                 self.to_rest_pose()
             # indicates pick action
             elif i==1:
                 self.to_rest_pose()
-                
                 # rospy.Subscriber("/kinect/color/image_rect_color", Image, callback)
                 # def callback(msg):
                 #     self.image = self.br.imgmsg_to_cv2(msg)
@@ -247,77 +400,7 @@ class MotionPlanner(object):
                 image = self.br.imgmsg_to_cv2(image)
                 image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
                 
-                BASE_DIR = '/root/ocrtoc_ws/src/image_seg'
-                # os.makedirs(BASE_DIR, exist_ok=True)
-                Path(BASE_DIR).mkdir(exist_ok=True, parents=True)
-                
-                def get_random_name(CHAR_LEN=5):
-                    chars = 'abcdefghijklmnopqrstuvwxyz0123456789'
-                    return ''.join([chars[random.randint(0, len(chars)-1)] for i in range(CHAR_LEN)])
-                
-                random_path = get_random_name()
-                
-                # save the scene image to the directory
-                scene_filename = random_path + '.jpg'
-                # print(f'Scene filename : {scene_filename}')
-                print('scene_filename', scene_filename)
-                
-                
-                scene_dir = os.path.join(BASE_DIR, 'scenes')
-                # os.makedirs(scene_dir, exists_ok=True)
-                Path(scene_dir).mkdir(exist_ok=True, parents=True)
-                
-                # get the target images from the pyyaml file based on the objects                
-                scene_image_path = os.path.join(scene_dir, scene_filename)
-                # return scene_image[:200, 500:800]
-                cv2.imwrite(scene_image_path, image)
-                
-                target_objects_path = '/root/ocrtoc_ws/src/ocrtoc_perception/src/ocrtoc_perception/pose/rendered_object_images'
-                
-                target_objects = list() # list of target object filepaths - take the 000001.png
-                # all_objects = glob(target_objects_path + '/*')
-                
-                for target_object in target_object_list.keys():
-                    target_object = target_object.rsplit('_', 1)[0]
-                    target_object += '720_1280'
-                    
-                    inter_object_path = os.path.join(os.path.join(target_objects_path, target_object), '000001.png')
-                    print("inter_object_path", inter_object_path)
-                    if os.path.exists(inter_object_path):
-                        target_objects.append(inter_object_path)
-                    
-                target_object_string = ':'.join(target_object for target_object in target_objects)
-                
-                
-                
-                
-                
-                
-                # print("!!!!!!!!!!!!!!")
-                # print("target object string", target_object_string)
-                
-                # target_images_dir_path = os.path.join(os.path.join(BASE_DIR, 'target_images'), random_path)
-                
-                # # os.makedirs(target_images_dir, exists_ok=True)
-                # Path(target_images_dir_path).mkdir(exist_ok=True, parents=True)
-                
-                # target_images_dir = os.path.join(target_images_dir, random_path)
-                
-                # the full target dir path is reconstructed inside the function 
-                command = '/root/ocrtoc_ws/src/ocrtoc_planning/scripts/run_mmdetection_segmentation.sh {} {} {}'.format(scene_image_path, target_object_string, random_path)
-                
-                print('Running object image segmentation')
-                os.system(command)
-                
-                                                  
-                # run the object instance segmentation on the image and get the matched object
-                
-                #Call superglue and check which image it matches with amongst the other objects
-                obj = check_match_superglue(saved_dir)
-                
-                
-                # kinect_image = image
-            
+                detected_obj, _ = self.get_best_object_match_using_color_distribution(image, target_object_list)
                 
             fraction = 0
             attempts = 0

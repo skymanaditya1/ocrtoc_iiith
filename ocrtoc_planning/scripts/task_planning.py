@@ -701,7 +701,7 @@ class TaskPlanner(object):
                     print((roll, pitch, yaw))  
                     
                     
-                    if abs(yaw) > abs(np.deg2rad(120)) and abs(yaw) < abs(np.deg2rad(240)):
+                    if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
                         yaw = yaw + np.pi
                       
                     print((roll, pitch, yaw))  
