@@ -414,7 +414,6 @@ class MotionPlanner(object):
         for i, point in enumerate(points_to_target):
         
             if i==1: # and last_gripper_action=='place':
-                
                 self.to_rest_pose()
             fraction = 0
             attempts = 0

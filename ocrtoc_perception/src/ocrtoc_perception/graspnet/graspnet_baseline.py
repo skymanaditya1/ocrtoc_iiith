@@ -83,7 +83,6 @@ class GraspNetBaseLine():
         from matplotlib import pyplot as plt
         
         gg_array = grasp_preds[0].detach().cpu().numpy()
-        print(gg_array[0])
         gg = GraspGroup(gg_array)
         return gg
 

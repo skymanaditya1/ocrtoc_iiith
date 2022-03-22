@@ -242,7 +242,7 @@ def generate_scene_graph_from_object_dict(object_dict, mesh_dir='/root/ocrtoc_ws
 
     final_object_stacks = {}
     for i, key in enumerate(object_stacks.keys()):
-        final_object_stacks[key] = {
+        final_object_stacks[object_info_dict[key]['object']] = {
             'current_object_info': object_stacks[key]['current_object_info'],
             'mesh_ids_of_objects_under_it': node_dict[key].parent_mesh_ids,
             'objects_under_it': node_dict[key].parents
@@ -251,9 +251,9 @@ def generate_scene_graph_from_object_dict(object_dict, mesh_dir='/root/ocrtoc_ws
         # print("Object name: {}\tObject mesh id: {}\nObject stack list: {}\n".format(object_info_dict[key]['object'], object_info_dict[key]['mesh_id'], geometry_ids))
     
     # Save contents to the given file location
-    np.savez_compressed(save_path, data=final_object_stacks)
-    # with open(save_path, 'w') as fp:
-    #     json.dump(object_stacks, fp)
+    # np.savez_compressed(save_path, data=final_object_stacks)
+    with open(save_path, 'wb') as fp:
+        pickle.dump(final_object_stacks, fp, protocol=2)
 
 
 def generate_scene_graph_from_object_dict2(object_dict, mesh_dir='/root/ocrtoc_ws/src/ocrtoc_materials/models', save_path='/root/ocrtoc_ws/src/stack_detection/scene_dict.npz'):
@@ -406,7 +406,9 @@ if __name__ == "__main__":
     # with open(FLAGS.object_dict_path, 'rb') as f:
     #     object_dict = pickle.load(f)
 
-    object_dict = np.load(FLAGS.object_dict_path, allow_pickle=True)['data'].item()
+    # object_dict = np.load(FLAGS.object_dict_path, allow_pickle=True)['data'].item()
+    with open(FLAGS.object_dict_path, 'rb') as f:
+        object_dict = pickle.load(f)
     print("Object_dict: {}\n\nType:{}".format(object_dict, type(object_dict)))
 
     generate_scene_graph_from_object_dict(object_dict, mesh_dir=FLAGS.mesh_dir, save_path=FLAGS.save_path)

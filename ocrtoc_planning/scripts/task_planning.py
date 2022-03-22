@@ -18,6 +18,7 @@ import numpy as np
 import transforms3d
 import os
 import yaml
+import pickle
 
 from std_msgs.msg import String, Bool, Empty, Int64
 from gazebo_msgs.srv import *
@@ -77,7 +78,7 @@ def get_a_graph_from_obj_dict(object_stacks):
     stacks = []
     # nodes = []
     node_dict = {}
-    for i, key in enumerate(object_stacks):
+    for i, key in enumerate(object_stacks.keys()):
         # Here key == mesh_id of the object
         obj_name = object_stacks[key]['current_object_info']['object']
         mesh_id = key
@@ -86,7 +87,7 @@ def get_a_graph_from_obj_dict(object_stacks):
         node_dict[key] = node
 
     # Detect and break cycles in the obtained graph
-    for i, key in enumerate(node_dict):
+    for i, key in enumerate(node_dict.keys()):
         # Run bfs based cycle-detection
         visited = np.zeros(len(node_dict.keys()))
         # print(visited)
@@ -119,7 +120,7 @@ def get_a_graph_from_obj_dict(object_stacks):
 
     # Print the obtained tree after removing all the cycles in the given graph
     print("\nPrinting the modified trees:\n")
-    for i, key in enumerate(node_dict):
+    for i, key in enumerate(node_dict.keys()):
         print("Object_name: {}\tMesh_id: {}\tParent_list: {}".format(node_dict[key].object, node_dict[key].mesh_id, node_dict[key].parents))      
 
     return node_dict  
@@ -252,7 +253,7 @@ class OccupancyAndBuffer:
         # cv2.imshow('Occupancy map', (occ_map * 255).astype(np.uint8))
         # cv2.waitKey(0)
 
-        print(pixel_counts)
+        # print(pixel_counts)
 
         return occ_map
     
@@ -350,7 +351,7 @@ class OccupancyAndBuffer:
         current_position = [target_pose_6D[0], target_pose_6D[1], target_pose_6D[2]]
         prev_min_val = 100
         n_steps = 3
-        while not done and n_steps>0:
+        while not done and n_steps>=0:
             n_steps = n_steps - 1
             sampled_pts = self.sample_8_pts_around_given_point(given_pt=current_position, step=search_step)
             occ_percents = []
@@ -358,14 +359,16 @@ class OccupancyAndBuffer:
                 pose_6d = [pt[0], pt[1], pt[2], target_pose_6D[3], target_pose_6D[4], target_pose_6D[5]]
                 occ_percent = self.get_occupancy_percentage(target_pose_6D=pose_6d, scene_omap=scene_omap, entity=entity)
                 occ_percents.append(occ_percent)
-            print(occ_percents)
+            print("Occupancy percents: {}".format(occ_percents))
             
             min_val = min(occ_percents)
             min_index = occ_percents.index(min_val)
             print("min_index: {}\tmin_val: {}".format(min_index, min_val))
             if min_val <= OCC_THRESH:
-                print("Min pose found")
+                print("Min pose found - min occupancy: {}".format(min_val))
                 done = True
+                current_position = sampled_pts[min_index]
+            elif min_val < prev_min_val:
                 current_position = sampled_pts[min_index]
             elif min_val==prev_min_val:
                 current_position = sampled_pts[min_index]
@@ -375,7 +378,8 @@ class OccupancyAndBuffer:
 
         buffer_spot = [current_position[0], current_position[1], current_position[2], 
                     target_pose_6D[3], target_pose_6D[4], target_pose_6D[5]]
-        print(buffer_spot)
+        print("Buffer spot: {}".format(buffer_spot))
+        print("Actual spot: {}".format(target_pose_6D))
 
         return buffer_spot
     
@@ -815,7 +819,7 @@ class TaskPlanner(object):
             # rnode.prev_node_in_stack.append()
             red_node_dict[object_name] = rnode
             # red_nodes.append(rnode)
-        for i, key in red_node_dict:
+        for i, key in enumerate(red_node_dict.keys()):
             for parent in red_node_dict[key].prev_node_in_stack:
                 red_node_dict[parent].next_node_in_stack.append(key)
         return red_node_dict
@@ -828,7 +832,7 @@ class TaskPlanner(object):
         Returns:
         None
         '''
-        for i, key in self.red_node_dict:
+        for i, key in enumerate(self.red_node_dict.keys()):
             node = self.red_node_dict[key]
             if node.object in detected_object_label_list:
                 print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
@@ -1008,7 +1012,7 @@ class TaskPlanner(object):
         # 1. Get target scene stack information
         # 1.1 Generate the object stack information
         object_dict = {}
-        for i, key in enumerate(self.object_goal_pose_dict):
+        for i, key in enumerate(self.object_goal_pose_dict.keys()):
             position = self.object_goal_pose_dict[key].position
             p = [position.x, position.y, position.z]
             orientation = self.object_goal_pose_dict[key].orientation
@@ -1025,17 +1029,22 @@ class TaskPlanner(object):
         OBJECT_DIR_PATH = '/root/ocrtoc_ws/src/stack_detection/object_dict.npz'
         MESH_DIR = '/root/ocrtoc_ws/src/ocrtoc_materials/models/'
         SAVE_PATH = '/root/ocrtoc_ws/src/stack_detection/scene_dict.npz' 
-        np.savez_compressed(OBJECT_DIR_PATH, data=object_dict)
+        # np.savez_compressed(OBJECT_DIR_PATH, data=object_dict)
+        with open(OBJECT_DIR_PATH, 'wb') as f:
+            pickle.dump(object_dict, f)
         print("Running stack detection")
         command = '/root/ocrtoc_ws/src/stack_detection/run_script.sh {} {} {}'.format(OBJECT_DIR_PATH, MESH_DIR, SAVE_PATH)
         os.system(command)
         # 1.1. Load the dictionary and convert it into object stack dictionary 
-        self.object_stacks = np.load(SAVE_PATH, allow_pickle=True)['data'].item()
+        with open(SAVE_PATH, 'rb') as f:
+            self.object_stacks = pickle.load(f)
+        # self.object_stacks = np.load(SAVE_PATH, allow_pickle=True)['data'].item()
             
         # 2. Create black nodes for target poses
         self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
         # 3. Create red nodes for initial poses
-        self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates, self.object_stacks)
+        print("Object stack dict: {}".format(self.object_stacks))
+        self.red_node_dict = self.initialize_initial_red_nodes(self.block_labels_with_duplicates, self.object_stacks)
 
 
             
@@ -1091,7 +1100,8 @@ class TaskPlanner(object):
             
             
     def find_red_node(self):
-        for i, key in self.red_node_dict:
+        for i, key in enumerate(self.red_node_dict.keys()):
+            print(key)
             node = self.red_node_dict[key]
             if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.pickable==True:
                 parents_done = True
@@ -1110,7 +1120,8 @@ class TaskPlanner(object):
         return None
 
     def just_find_red(self):
-        for i, key in self.red_node_dict:
+        for i, key in enumerate(self.red_node_dict.keys()):
+            print(key)
             node = self.red_node_dict[key]
             if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True:
                 return node
@@ -1149,6 +1160,7 @@ class TaskPlanner(object):
                 #     continue
                 head = self.just_find_red()
                 if head == None:
+                    print("Seems like done, how???")
                     done = True
                     continue
                 
@@ -1257,7 +1269,7 @@ class TaskPlanner(object):
         orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
         (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
         print((roll, pitch, yaw))  
-        if abs(yaw) > abs(np.deg2rad(135)) and abs(yaw) < abs(np.deg2rad(225)):
+        if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
             yaw = yaw + np.pi
         orientation_q = quaternion_from_euler(roll, pitch, yaw)
         pick_grasp_pose.orientation = Quaternion(*orientation_q)                                                                             
@@ -1364,7 +1376,7 @@ class TaskPlanner(object):
                     (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
                     print((roll, pitch, yaw))  
                     
-                    if abs(yaw) > abs(np.deg2rad(135)) and abs(yaw) < abs(np.deg2rad(225)):
+                    if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
                         yaw = yaw + np.pi
                     orientation_q = quaternion_from_euler(roll, pitch, yaw)
                     
