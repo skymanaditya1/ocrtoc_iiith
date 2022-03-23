@@ -30,7 +30,7 @@ reconstruction:
     translation_thresh: 3.95
     rotation_thresh: 0.02
     max_correspondence_distance: 0.02
-    both_camera_order: [1,0,2, 3, 4] #[2,1,0,3,4,5,6]
+    both_camera_order: [1, 0, 2, 3, 4] #[2,1,0,3,4,5,6]
     realsense_camera_order: [2,1,0,3,4,5]
 
 6d_pose_by_geometry:
@@ -80,7 +80,7 @@ superglue:
         min_correspondence_thresh: 5
 
 graspnet:
-    refine_approach_dist: 0.09
+    refine_approach_dist: 0.092
 
 response:
     dist_thresh: 0.1
@@ -88,4 +88,4 @@ response:
     mask_thresh: 0.5
 
 debug: False
-debug_pointcloud: False
+debug_pointcloud: True

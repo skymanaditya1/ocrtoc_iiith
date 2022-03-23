@@ -16,6 +16,7 @@ import moveit_msgs.msg
 import rospkg
 import rospy
 import time
+from sensor_msgs.msg import JointState
 
 from ocrtoc_common.transform_interface import TransformInterface
 
@@ -365,6 +366,20 @@ class MotionPlanner(object):
         rospy.loginfo('(upright path) Action finished, action result' + str(move_result))
         return move_result
     
+    
+    def gripper_width_test(self):
+        #check if the gripper distance is zero
+        print("joint state")
+        joint_state = rospy.wait_for_message("/joint_states", JointState)
+        gripper_dist = [joint_state.position[0], joint_state.position[1]]
+        print("gripper distance is", gripper_dist)
+        if gripper_dist[0] > 0.005 and gripper_dist[1] > 0.005:
+            result = True #successully grabbed the object
+        else:
+            result = False #failed to grab the object
+        return result
+    
+    
     # generate cartesian straight path
     def move_cartesian_space_upright(self, pose_goal, via_up = False, last_gripper_action='pick'):
         # get a list of way points to target pose, including entrance pose, transformation needed
@@ -389,8 +404,15 @@ class MotionPlanner(object):
         points_to_target = self.get_points_to_target_upright(group_goal)
         for i, point in enumerate(points_to_target):
         
-            if i==1: # and last_gripper_action=='place':
+            if i==1 and last_gripper_action=='place':
                 self.to_rest_pose()
+            
+            if i==1 and last_gripper_action=='pick':
+                self.to_rest_pose()
+                success = self.gripper_width_test()
+                if success == False:
+                    return False
+                
             fraction = 0
             attempts = 0
             waypoints = []
@@ -633,6 +655,17 @@ class MotionPlanner(object):
 
         self._gripper_client.send_goal(goal)
         rospy.sleep(2.0)
+    
+    
+    #A dummy for a bug. Check it later
+    def fake_place(self):
+        self._gripper_client.wait_for_server()
+        goal = control_msgs.msg.GripperCommandGoal()
+        goal.command.position = 0.045 #0.039
+        goal.command.max_effort = 30
+
+        self._gripper_client.send_goal(goal)
+        rospy.sleep(0.5)
 
     # get a list of via points from current position to target position (add exit and entrance point to pick and place position)
     def get_points_to_target_upright(self, target_pose):
