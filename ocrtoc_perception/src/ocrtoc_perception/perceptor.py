@@ -56,6 +56,7 @@ def process_pcds(pcds, use_camera, reconstruction_config):
     trans = dict()
     start_id = reconstruction_config['{}_camera_order'.format(use_camera)][0]
     pcd = copy.deepcopy(crop_pcd(pcds, start_id, reconstruction_config))
+    print("np.asarray(pcd.points).shape[0]", np.asarray(pcd.points).shape)
     pcd.estimate_normals()
     pcd, _ = pcd.remove_statistical_outlier(
         nb_neighbors = reconstruction_config['nb_neighbors'],
@@ -65,6 +66,13 @@ def process_pcds(pcds, use_camera, reconstruction_config):
     for i in idx_list[1:]: # the order are decided by the camera pose
         voxel_size = reconstruction_config['voxel_size']
         income_pcd = copy.deepcopy(crop_pcd(pcds, i, reconstruction_config))
+        
+        
+        print("np.asarray(income_pcd.points).shape[0]", np.asarray(income_pcd.points).shape)
+        
+        if np.asarray(income_pcd.points).shape[0] == 0:
+            continue
+        
         income_pcd, _ = income_pcd.remove_statistical_outlier(
             nb_neighbors = reconstruction_config['nb_neighbors'],
             std_ratio = reconstruction_config['std_ratio']
@@ -213,6 +221,9 @@ class Perceptor():
             full_pcd_kinect.transform(points_trans_matrix)
             full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
             if self.use_camera == 'both':
+                
+                # print("np.asarray(full_pcd_kinect.points).shape[0]", np.asarray(full_pcd_kinect.points).shape[0])
+                                    
                 pcds.append(full_pcd_kinect)
                 kinect_image = self.get_kinect_image()
                 kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGBA2RGB)
@@ -256,6 +267,7 @@ class Perceptor():
                 if self.debug:
                     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
                     o3d.visualization.draw_geometries([pcd, frame])
+                      
                 pcds.append(pcd)
 
         # capture image by kinect
@@ -573,12 +585,12 @@ class Perceptor():
 
             print("ts shape", ts.shape)
             print("object_pose['pose'][:3, 3]", object_pose['pose'][:3, 3].shape)
-
-
             print(ts)
 
             # assert False
-
+            
+            # object_mask = ts[:, 2] < 0.2
+            
             object_mask = np.logical_and(dists < dist_thresh, ts[:, 2] < 0.2)
             
             print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
@@ -595,9 +607,9 @@ class Perceptor():
             
             object_mask = min_object_ids[i]
             
-            # if np.sum(object_mask) == 0:
-            #     grasp_poses[object_name] = None
-            #     continue
+            if np.sum(object_mask) == 0:
+                grasp_poses[object_name] = None
+                continue
             
             i_gg = gg[object_mask]
             i_scores = scores[object_mask]
@@ -607,19 +619,19 @@ class Perceptor():
             # next, we only pick the grasp poses sorted according to 
             # the confidence threshold. We only pick the top n poses.
             
-            n = 100
+            n = 10000
             
-            correct_indices = i_scores > 0.25
+            # correct_indices = i_scores > 0.25
             
-            if correct_indices.sum() == 0:
-                grasp_poses[object_name] = None
-                continue
+            # if correct_indices.sum() == 0:
+            #     grasp_poses[object_name] = None
+            #     continue
             
-            i_scores = i_scores[correct_indices]
-            i_gg = i_gg[correct_indices]
-            i_ts = i_ts[correct_indices]
-            i_eelink_rs = i_eelink_rs[correct_indices]
-
+            # i_scores = i_scores[correct_indices]
+            # i_gg = i_gg[correct_indices]
+            # i_ts = i_ts[correct_indices]
+            # i_eelink_rs = i_eelink_rs[correct_indices]
+            
             top_indices = (-i_scores).argsort()[:n]
             top_i_gg = i_gg[top_indices]
             top_i_eelink_rs = i_eelink_rs[top_indices]
@@ -635,13 +647,25 @@ class Perceptor():
             # next, we want the poses with the lowest gravitional angle
             # we convert to euler, ideal is np.pi, 0. We sort according
             # to the norm and then take the minimum of all the angls.
-            ideal_angle = np.array([np.pi, 0])
-            angles_scores = np.linalg.norm(ideal_angle - top_i_euler[:, :2], axis = 1)
-            print(" angle scores: {}".format(angles_scores))
-            print(" top i euler {}: ".format(top_i_euler[:, :2]))
+            # not the minimum, but we are putting a threshold. 
             
-            smallest_index = np.argmin(angles_scores)
+            # ideal_angle = np.array([np.pi, 0])
+            # angles_scores = np.linalg.norm(ideal_angle - top_i_euler[:, :2], axis = 1)
+            # print(" angle scores: {}".format(angles_scores))
+            # print(" top i euler {}: ".format(top_i_euler[:, :2]))
+            
+            # smallest_index = np.argmin(angles_scores)
+            
+            dists = np.linalg.norm(top_i_ts - object_pose['pose'][:3, 3], axis = 1)
+            
+            print('Here is the dists:', dists)
+            
+            smallest_index = np.argmin(dists)
             print("smallest index {}".format(smallest_index))
+            print("selected distance: ", dists[smallest_index])
+            print("object_name: ", object_name)
+            print("selected grasp ts ", top_i_ts[smallest_index])
+            print("object pose: ", object_pose)
             print('Best pose: {}'.format(top_i_euler[smallest_index]))
             
             best_gg = top_i_gg[int(smallest_index)]
