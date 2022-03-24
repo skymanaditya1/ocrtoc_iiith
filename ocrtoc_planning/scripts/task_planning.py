@@ -980,7 +980,7 @@ class TaskPlanner(object):
         # Remove clear_box from the list of movable objects
         temp = []
         for object in left_object_labels:
-            if self.search_strings2(object, ['clear_box', 'book']):
+            if self.search_strings2(object, ['clear_box', 'book', 'round_plate', 'plate_holder']):
                 continue
             temp.append(object)
         left_object_labels = copy.deepcopy(temp)
