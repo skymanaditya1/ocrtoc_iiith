@@ -607,7 +607,7 @@ class Perceptor():
             # next, we only pick the grasp poses sorted according to 
             # the confidence threshold. We only pick the top n poses.
             
-            n = 5
+            n = 100
             i_scores = i_scores[i_scores > 0.25]
             if len(i_scores) == 0:
                 grasp_poses[object_name] = None

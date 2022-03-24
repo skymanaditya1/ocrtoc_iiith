@@ -1065,6 +1065,7 @@ class TaskPlanner(object):
                 obj_init_pose = np.array([i_p.x, i_p.y, i_p.z])
                 if np.linalg.norm(obj_goal_pose - obj_init_pose) < 0.05:
                     done_object_labels.append(label)
+                    self.red_node_dict[label].done = True
                     
             # for node in self.red_nodes:
                 
@@ -1103,7 +1104,7 @@ class TaskPlanner(object):
         for i, key in enumerate(self.red_node_dict.keys()):
             print(key)
             node = self.red_node_dict[key]
-            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.pickable==True:
+            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.pickable==True and node.done == False:
                 parents_done = True
                 for parent in node.prev_node_in_stack:
                     if self.red_node_dict[parent].done == False:
@@ -1123,7 +1124,7 @@ class TaskPlanner(object):
         for i, key in enumerate(self.red_node_dict.keys()):
             print(key)
             node = self.red_node_dict[key]
-            if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True:
+            if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True and node.done == False:
                 return node
         return None
 
@@ -1163,14 +1164,8 @@ class TaskPlanner(object):
                     print("Seems like done, how???")
                     done = True
                     continue
-                
-                # First pick the object
-                res = self.go_pick_object(object_name=head.object)
-                if res==False:
-                    head.pickable = False
-                    self._motion_planner.place()
-                    self._motion_planner.move_current_to_home_via_exit()
-                    continue
+
+                # self._motion_planner.move_current_to_home_via_exit()
                 
                 # buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
                 # buffer.occupied = copy.deepcopy(head.occupied)
@@ -1198,6 +1193,14 @@ class TaskPlanner(object):
                 # res = self.go_pick_object(object_name=head.object)
                 # if res == True:
                 # self._motion_planner.
+                # First pick the object
+                print("Object that is about to be picked -- {}".format(head.object))
+                res = self.go_pick_object(object_name=head.object)
+                if res==False:
+                    head.pickable = False
+                    self._motion_planner.place()
+                    self._motion_planner.move_current_to_home_via_exit()
+                    continue
                 self.go_place_object(object_name=head.object, final_place_pose=buffer_pose, current_place='home')
                 print("Placed in buffer!")
                 # import time
@@ -1231,6 +1234,7 @@ class TaskPlanner(object):
             # print("Node: {}".format(head.name))
             # Find an undone red
             print("Picking and placing in target pose (since target pose is empty!)")
+            print("Object that is about to be picked -- {}".format(head.object))
             self.go_pick_object(object_name=head.object)
             self.go_place_object(object_name=head.object)
             print("Placed in target pose!")
