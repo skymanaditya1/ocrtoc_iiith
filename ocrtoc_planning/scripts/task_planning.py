@@ -978,12 +978,6 @@ class TaskPlanner(object):
         left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
         # Remove clear_box from the list of movable objects
-        temp = []
-        for object in left_object_labels:
-            if self.search_strings2(object, ['clear_box', 'book', 'round_plate', 'plate_holder']):
-                continue
-            temp.append(object)
-        left_object_labels = copy.deepcopy(temp)
              
                    
         # 1. Create black nodes for target poses
