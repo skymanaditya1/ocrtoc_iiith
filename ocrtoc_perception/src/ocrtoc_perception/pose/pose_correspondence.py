@@ -205,9 +205,7 @@ def get_pose_superglue(obj_list, images, camera_poses, camera_matrix, superglue_
         pose_ret[obj] = (0, None)
 
     for image, camera_pose in zip(images, camera_poses):
-        # print("Image resolution: {}".format(image.shape))
-        # image = cv2.resize(image, None, fx=0.5, fy=0.5, interpolation=cv2.INTER_CUBIC)
-        # print("Image res after resizing: {}".format(image.shape))
+        
         ret = compute_pose(matching, renderer, obj_list, image, camera_pose,
                            rendered_image_suffix, camera_matrix, rendered_object_dir, models_dir, rot=0, config = superglue_config['compute_pose'])
         for model, (num_matches, pose) in ret.items():

@@ -1,6 +1,7 @@
 <?xml version="1.0"?>
 <launch>
   <arg name="task_index" default="0-0" doc="Task index"/>
+  <!-- <param name="use_sim_time" value="true"/> -->
   <node pkg="pybullet_simulator" type="load_env_ros.py" name="pybullet_env" respawn="false" output="screen" >
     <param name="task_index" value="$(arg task_index)"/>
   </node>

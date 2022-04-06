@@ -8,4 +8,5 @@
     <param name="log_file" value="$(find ocrtoc_task)/evaluation/$(arg task_index)_grasp_detection.txt"/>
     <param name="evaluation" value="False"/>
   </node>
+  <param name="use_sim_time" value="true"/>
 </launch>

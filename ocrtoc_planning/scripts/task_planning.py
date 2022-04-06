@@ -1049,6 +1049,7 @@ class TaskPlanner(object):
 
             
         count = 3
+        joint_state = rospy.wait_for_message("/joint_states", JointState)
         while len(left_object_labels) > 0 and count > 0:
             count -= 1
             # 3. Get information about left objects from perception node
@@ -1084,6 +1085,7 @@ class TaskPlanner(object):
             # self.update_black_nodes(current_pcd, occ_map)
             # prospective_pcd = self.construct_pcd_of_targets()
             # 6. Start task plan
+            joint_state = rospy.wait_for_message("/joint_states", JointState)
             completed_objects = self.solve()
             # self.solve(occ_map=occ_map)
             

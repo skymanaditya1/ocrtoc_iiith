@@ -571,8 +571,8 @@ class Perceptor():
             
             dists = np.linalg.norm(ts - object_pose['pose'][:3, 3], axis = 1)
 
-            print("ts shape", ts.shape)
-            print("object_pose['pose'][:3, 3]", object_pose['pose'][:3, 3].shape)
+            # print("ts shape", ts.shape)
+            # print("object_pose['pose'][:3, 3]", object_pose['pose'][:3, 3].shape)
 
 
             print(ts)
@@ -581,7 +581,7 @@ class Perceptor():
 
             object_mask = np.logical_and(dists < dist_thresh, ts[:, 2] < 0.2)
             
-            print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
+            # print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
             
             min_object_ids[i] = object_mask
             
@@ -619,23 +619,23 @@ class Perceptor():
             top_i_ts = i_ts[top_indices]
             
             top_i_euler = np.array([self.rotationMatrixToEulerAngles(r) for r in top_i_eelink_rs])
-            print('Top Eulers shape', top_i_euler.shape)
+            # print('Top Eulers shape', top_i_euler.shape)
             
-            print("i scores")
-            print(i_scores)
-            print("======")
+            # print("i scores")
+            # # print(i_scores)
+            # print("======")
 
             # next, we want the poses with the lowest gravitional angle
             # we convert to euler, ideal is np.pi, 0. We sort according
             # to the norm and then take the minimum of all the angls.
             ideal_angle = np.array([np.pi, 0])
             angles_scores = np.linalg.norm(ideal_angle - top_i_euler[:, :2], axis = 1)
-            print(" angle scores: {}".format(angles_scores))
-            print(" top i euler {}: ".format(top_i_euler[:, :2]))
+            # print(" angle scores: {}".format(angles_scores))
+            # print(" top i euler {}: ".format(top_i_euler[:, :2]))
             
             smallest_index = np.argmin(angles_scores)
-            print("smallest index {}".format(smallest_index))
-            print('Best pose: {}'.format(top_i_euler[smallest_index]))
+            # print("smallest index {}".format(smallest_index))
+            # print('Best pose: {}'.format(top_i_euler[smallest_index]))
             
             best_gg = top_i_gg[int(smallest_index)]
             
