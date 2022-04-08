@@ -1,0 +1,2 @@
+Task name: 2-2-1 | Scene mean score: 0.218273853065 | Time cost: 602.009241104
+Task name: 2-2-1 | Scene mean score: 0.172360953736 | Time cost: 602.011595964
