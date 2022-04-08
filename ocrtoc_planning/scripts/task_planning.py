@@ -1059,14 +1059,14 @@ class TaskPlanner(object):
             
             # 4. Update the list of objects for which manipulation has to be performed
             done_object_labels = []
-            for label in self.detected_object_label_list:
-                g_p = self.object_goal_pose_dict[label].position
-                obj_goal_pose = np.array([g_p.x, g_p.y, g_p.z])
-                i_p = self.object_init_pose_dict[label].position
-                obj_init_pose = np.array([i_p.x, i_p.y, i_p.z])
-                if np.linalg.norm(obj_goal_pose - obj_init_pose) < 0.05:
-                    done_object_labels.append(label)
-                    self.red_node_dict[label].done = True
+            # for label in self.detected_object_label_list:
+            #     g_p = self.object_goal_pose_dict[label].position
+            #     obj_goal_pose = np.array([g_p.x, g_p.y, g_p.z])
+            #     i_p = self.object_init_pose_dict[label].position
+            #     obj_init_pose = np.array([i_p.x, i_p.y, i_p.z])
+            #     if np.linalg.norm(obj_goal_pose - obj_init_pose) < 0.05:
+            #         done_object_labels.append(label)
+            #         self.red_node_dict[label].done = True
                     
             # for node in self.red_nodes:
                 
