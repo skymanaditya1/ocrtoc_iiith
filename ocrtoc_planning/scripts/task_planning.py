@@ -19,6 +19,7 @@ import rospy
 from sensor_msgs.msg import JointState
 import time
 
+from scene_classification import process_scene
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'pddlstream'))
 from pddlstream.algorithms.focused import solve_focused
@@ -93,8 +94,8 @@ class TaskPlanner(object):
 
         self._goal_cartesian_pose_dic = {}
         for object_type in _goal_cartesian_pose_dic_temp:
-            if 'clear_box' in object_type:
-                continue
+            # if 'clear_box' in object_type:
+            #     continue
             for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
                 self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
         self._blocks = list(self._goal_cartesian_pose_dic.keys())
@@ -435,6 +436,9 @@ class TaskPlanner(object):
             self.clear_box_flag = True
             print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         
+        ### Scene recognition
+        scene_identified = False
+        
         while len(left_object_dic) != 0:
             # get left objects information
             rospy.loginfo('Try to get information of left objects from perception node')
@@ -459,6 +463,9 @@ class TaskPlanner(object):
                 else:
                     continue
 
+            if not scene_identified:
+                process_scene(self._available_cartesian_pose_dic, self._goal_cartesian_pose_dic, self._available_grasp_pose_dic)
+            
             # compare goal objects and currently available objects
             self._target_cartesian_pose_dic.clear()
             self._target_block_pose_dic.clear()
