@@ -1,0 +1,11 @@
+This is new branch 2 created on 9th of April. This branch contains the following task planning algorithm:
+
+- Use stacking information to modify the OR-Tools-generated sequence. Then use target occupancy (buffer) to decide which object to pick first from the given sequence (via iterating through the sequence, checking for each object's occupancy).
+
+- Works for the following scenarios:
+	1. All object positions occupied
+	2. Some object positions occupied
+	3. No object positions occupied
+	4. Stacking 
+
+- Buffer positions included
