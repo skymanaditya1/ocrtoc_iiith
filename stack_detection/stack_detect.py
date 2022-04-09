@@ -12,6 +12,7 @@ NOTE: RAY CASTING exists only in open3d version>=0.14.0 (Here, it is being teste
 Team Lumos
 '''
 
+from unicodedata import name
 import open3d as o3d
 import numpy as np
 import matplotlib.pyplot as plt
@@ -36,6 +37,8 @@ class SGNode:
         self.parent_mesh_ids = parent_mesh_ids
         self.parents = parents
 
+# def get_a_graph_from_obj_dict(object_stacks):
+
     
 
 def get_a_graph_from_obj_dict(object_stacks):
@@ -56,6 +59,7 @@ def get_a_graph_from_obj_dict(object_stacks):
     stacks: list of stacks = [[stack_1 mesh ids (left to right ids indicate bottom to top in the stack)], 
                                 [stack 2], ...etc]
     '''
+
     stacks = []
     # nodes = []
     node_dict = {}
@@ -69,11 +73,14 @@ def get_a_graph_from_obj_dict(object_stacks):
         node_dict[key] = node
 
     # Detect and break cycles in the obtained graph
-    for i, key in enumerate(node_dict.keys()):
+    print('Node dict: {}'.format(node_dict.keys()))
+    # dict_keyz = copy.deepcopy(node_dict.keys())
+    for i, name in enumerate(node_dict.keys()):
         # Run bfs based cycle-detection
-        visited = np.zeros(len(node_dict.keys()))
+        
+        visited = np.zeros(len(node_dict.keys())+1)
         # print(visited)
-        head = node_dict[key]
+        head = node_dict[name]
         # print("Node type: {}, mesh id type: {}".format(type(head), int(head.mesh_id)))
         to_visit_list = []
         # print(i)
@@ -87,14 +94,18 @@ def get_a_graph_from_obj_dict(object_stacks):
                     # Found a cycle
                     # Break the cycle by removing the parent from the parent list
                     cycle_parents.append(parent)
+                    continue
                 to_visit_list.append(parent)
             for parent in cycle_parents:
                 head.parent_mesh_ids.remove(parent)
+                print(parent, node_dict.keys())
+                head.parents.remove(node_dict[str(parent)].object)
                 if parent in to_visit_list:
                     to_visit_list.remove(parent)
 
             if len(to_visit_list)!=0:
                 # print(type(to_visit_list[0]))
+                # node_dict[name] = copy.deepcopy(head)
                 head = node_dict[str(to_visit_list[0])]
                 to_visit_list.pop(0) 
             else:

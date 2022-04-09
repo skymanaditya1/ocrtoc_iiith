@@ -49,6 +49,85 @@ from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
 
+# Stacking related functions
+class SGNode:
+    def __init__(self, object_name, mesh_id, parents):
+        '''
+        object_name: Current object name
+        parents: Parents' node ids
+        '''
+        self.object = object_name
+        self.mesh_id = mesh_id
+        self.parents = parents
+
+def get_a_graph_from_obj_dict(object_stacks):
+    '''
+    Parameters:
+    object_stacks: {
+        'mesh_id': {
+            'current_object_info': {
+                'object': <object_label>,
+                'mesh_id': <object_mesh_id>
+            },
+            'mesh_ids_of_objects_under_it': [i, j, ...]
+        }
+    }
+
+    Return:
+    stacks: list of stacks = [[stack_1 mesh ids (left to right ids indicate bottom to top in the stack)], 
+                                [stack 2], ...etc]
+    '''
+    stacks = []
+    # nodes = []
+    node_dict = {}
+    for i, key in enumerate(object_stacks.keys()):
+        # Here key == mesh_id of the object
+        obj_name = object_stacks[key]['current_object_info']['object']
+        mesh_id = key
+        parents = object_stacks[key]['mesh_ids_of_objects_under_it']
+        node = SGNode(obj_name, mesh_id, parents)   
+        node_dict[key] = node
+
+    # Detect and break cycles in the obtained graph
+    for i, key in enumerate(node_dict.keys()):
+        # Run bfs based cycle-detection
+        visited = np.zeros(len(node_dict.keys()))
+        # print(visited)
+        head = node_dict[key]
+        # print("Node type: {}, mesh id type: {}".format(type(head), int(head.mesh_id)))
+        to_visit_list = []
+        # print(i)
+        while head != None:
+            # print(i)
+            # print(i, int(head.mesh_id))
+            visited[int(head.mesh_id)] = 1
+            cycle_parents = []
+            for parent in head.parents:
+                if visited[int(parent)] == 1:
+                    # Found a cycle
+                    # Break the cycle by removing the parent from the parent list
+                    cycle_parents.append(parent)
+                to_visit_list.append(parent)
+            for parent in cycle_parents:
+                head.parents.remove(parent)
+                if parent in to_visit_list:
+                    to_visit_list.remove(parent)
+
+            if len(to_visit_list)!=0:
+                # print(type(to_visit_list[0]))
+                head = node_dict[str(to_visit_list[0])]
+                to_visit_list.pop(0) 
+            else:
+                break
+
+    # Print the obtained tree after removing all the cycles in the given graph
+    print("\nPrinting the modified trees:\n")
+    for i, key in enumerate(node_dict.keys()):
+        print("Object_name: {}\tMesh_id: {}\tParent_list: {}".format(node_dict[key].object, node_dict[key].mesh_id, node_dict[key].parents))      
+
+    return node_dict  
+
+
 # Miscellineous functions class - contains functions from https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py 
 # As open3d_plus import failed (due to unknown reasons - TO BE FIXED)
 class MiscFunctions:
@@ -84,12 +163,50 @@ class MiscFunctions:
         points = np.asarray(pcd.points)
         colors = np.asarray(pcd.colors)
         return points, colors
+
+class Object:
+    def __init__(self, mesh_path):
+        '''
+        '''
+        self.mesh = o3d.io.read_triangle_mesh(mesh_path)
+        self.copy_mesh = None
+    
+    def render_to_pose(self, object_pose):
+        '''
+        Parameters:
+        object_pose: [6 element list] (x, y, z, roll, pitch, yaw)
+        '''
+        self.copy_mesh = copy.deepcopy(self.mesh)
+        R = self.copy_mesh.get_rotation_matrix_from_xyz((object_pose[3], object_pose[4], object_pose[5]))
+        center = np.array(self.copy_mesh.get_center())
+        self.copy_mesh.rotate(R, center=True)
+        required_pos = np.array([object_pose[0], object_pose[1], object_pose[2]])
+        dt = required_pos - center
+        self.copy_mesh.translate((dt[0], dt[1], dt[2]))
+
+
+    def get_pcd_from_copy_mesh(self, n_pts = 1000):
+        '''
+        Parameters:
+        n_pts: Number of points to be sampled
+        '''
+        pcd = self.copy_mesh.sample_points_poisson_disk(number_of_points=1000, init_factor=5, pcl=None)
+        return pcd
+
+    def render_to_pose_and_get_pcd(self, object_pose, n_pts = 1000):
+        '''
+        Parameters:
+        object_pose: [6 element list] (x, y, z, roll, pitch, yaw)
+        n_pts: Number of points to be sampled
+        '''
+        self.render_to_pose(object_pose=object_pose)
+        return self.get_pcd_from_copy_mesh(n_pts=n_pts)
     
 class OccupancyAndBuffer:
     def __init__(self):
         pass
     
-    def generate_2D_occupancy_map(self, world_dat, x_min=None, y_min=None, x_range=None, y_range=None, threshold=3, dir_path='/root/occ_map.png'):
+    def generate_2D_occupancy_map(self, world_dat, x_min=None, y_min=None, x_range=None, y_range=None, threshold=3, dir_path='/root/occ_map.png', save=False):
         '''
         A non-traditional way to mark occupied areas on a grid. In this method, we simply look for 
         areas with z>threshold (threshold~0) and mark them as occupied. This is expected to be highly
@@ -119,7 +236,7 @@ class OccupancyAndBuffer:
             y_coord = point[1] - y_min
             if x_coord > x_range or y_coord > y_range or x_coord < 0 or y_coord < 0:
                 continue
-            if point[2] > 0:
+            if point[2] > 0: 
                 pixel_counts[point[0]-x_min, point[1]-y_min]+=1
 
         mean_points = 1# np.mean(pixel_counts)
@@ -134,7 +251,7 @@ class OccupancyAndBuffer:
         # cv2.imshow('Occupancy map', (occ_map * 255).astype(np.uint8))
         # cv2.waitKey(0)
 
-        print(pixel_counts)
+        # print(pixel_counts)
 
         return occ_map
     
@@ -161,6 +278,108 @@ class OccupancyAndBuffer:
         # print(distances)
         # print("Valid empties: {}".format(valid_empties))
         return valid_empties[closest_ind]
+
+    def get_occupancy_percentage(self, target_pose_6D, scene_omap, entity):
+        '''Gets the percentage of target space that is occupied
+        '''
+        entity_pcd = entity.render_to_pose_and_get_pcd(object_pose=target_pose_6D)
+        entity_omap = self.generate_2D_occupancy_map(world_dat = np.asarray(entity_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120,
+                                                     threshold=1, dir_path='./results/object_{}-{}.png'.format('2-2-2', 'green_bowl'), save=False) # xy_min_max=[-30, 30, -60, 60], 
+        # cv2.imshow('Occupancy map', (scene_omap * 255).astype(np.uint8))
+        # cv2.waitKey(0)
+        if len(entity_omap) == 0:
+            return 100
+        occupancy = np.logical_and(scene_omap, entity_omap)
+        # print("Occupancy shape: {}".format(occupancy.shape))
+        total_occupied_space_of_object = np.sum(entity_omap)
+        occ_percent = float(np.sum(occupancy)*100.0)/(total_occupied_space_of_object)
+
+        return occ_percent
+
+    def sample_8_pts_around_given_point(self, given_pt, step=0.1):
+        '''Samples 9 points symmetrically in a square fashion around the given point in sample plane (z unchanged)
+        xxx
+        xox
+        xxx
+        Here, 'x' denote the sampled point, while 'o' denotes the given point
+        Parameters:
+        given_pt: list (1, 3): given point's 3D position
+        step: size of the step
+        Return:
+        pts = list (9, 3) # Includes the current point
+        '''
+        pts = []
+        for i in range(-1, 2, 1):
+            for j in range(-1, 2, 1):
+                # print(given_pt)
+                x = given_pt[0]+(i*step)
+                y = given_pt[1]+(j*step)
+                z = given_pt[2]
+                # print(x, y, z)
+                new_pt = [x, y, z]
+                # print(new_pt)
+                pts.append(new_pt)
+        return pts
+
+    def marching_grid(self, scene_pcd, object_mesh_path, target_pose_6D, OCC_THRESH=0.0, scene_name='-', object_name='-'):
+        '''Marching Grid algorithm
+        Returns the closest empty buffer space to the given target using marching grid algorithm
+        Parameters:
+        scene_pcd: Point cloud of the 3D scene
+        object_mesh_path: Path to the mesh file of the object
+        target_position_3D: list [x, y, z, roll, pitch, yaw] - Target 6D pose of object in world frame
+        OCC_THRESH: The maximum % for which a pose is considered to be free
+        Return:
+        buffer_spot: np.ndarray [x, y, z, roll, pitch, yaw] in world frame (same frame as the given world_data and 
+                        target_position 3D)
+        '''
+        scene_omap = self.generate_2D_occupancy_map(np.asarray(scene_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120,
+                                                    threshold=1, dir_path='./results/{}-{}.png'.format(scene_name, object_name), save=False) # xy_min_max=[-29.97, 29.97, -59.96, 59.99]
+        entity = Object(mesh_path=object_mesh_path)
+
+        occ_percent = self.get_occupancy_percentage(target_pose_6D=target_pose_6D, scene_omap=scene_omap, entity=entity)
+        print("Occupancy %: {}%".format(occ_percent))
+        if occ_percent<=OCC_THRESH:
+            print("Found!")
+            return target_pose_6D
+
+
+        done = False
+        search_step = 0.1
+        current_position = [target_pose_6D[0], target_pose_6D[1], target_pose_6D[2]]
+        prev_min_val = 100
+        n_steps = 3
+        while not done and n_steps>=0:
+            n_steps = n_steps - 1
+            sampled_pts = self.sample_8_pts_around_given_point(given_pt=current_position, step=search_step)
+            occ_percents = []
+            for i, pt in enumerate(sampled_pts):
+                pose_6d = [pt[0], pt[1], pt[2], target_pose_6D[3], target_pose_6D[4], target_pose_6D[5]]
+                occ_percent = self.get_occupancy_percentage(target_pose_6D=pose_6d, scene_omap=scene_omap, entity=entity)
+                occ_percents.append(occ_percent)
+            print("Occupancy percents: {}".format(occ_percents))
+            
+            min_val = min(occ_percents)
+            min_index = occ_percents.index(min_val)
+            print("min_index: {}\tmin_val: {}".format(min_index, min_val))
+            if min_val <= OCC_THRESH:
+                print("Min pose found - min occupancy: {}".format(min_val))
+                done = True
+                current_position = sampled_pts[min_index]
+            elif min_val < prev_min_val:
+                current_position = sampled_pts[min_index]
+            elif min_val==prev_min_val:
+                current_position = sampled_pts[min_index]
+                search_step = search_step/2
+            elif min_val > prev_min_val:
+                search_step = search_step/2
+
+        buffer_spot = [current_position[0], current_position[1], current_position[2], 
+                    target_pose_6D[3], target_pose_6D[4], target_pose_6D[5]]
+        print("Buffer spot: {}".format(buffer_spot))
+        print("Actual spot: {}".format(target_pose_6D))
+
+        return buffer_spot
     
     
     def get_empty_spot(self, pcd = [], occ_map = [], closest_target = np.array([])):
@@ -194,45 +413,6 @@ class OccupancyAndBuffer:
         return closest_empty_spot
         # mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[closest_empty_spot[0], closest_empty_spot[1], 0])
         # o3d.visualization.draw_geometries([pcd, mesh_frame])
-
-# Red Black Graph (Data structure)
-class RedBlackNode:
-    def __init__(self, name, node_type):
-        '''
-        Parameters
-        name: Name of the object that it is related to
-        node_type: 'r' or 'b' (red implies initial/virtual object poses, black implies target or completed initial poses)
-        
-        Attributes:
-        self.name: str: Unique identifier for each node (name+type)
-        self.object: str: Name of the object associated with the node
-        self.type: str: Type of node (red or black)
-        self.target_black: list: Target black node for this node if this node is red
-        self.done: boolean: If true, this node is done (task associated with it (pick-place) is done)
-        self.occupied: boolean: If true, this node is partially occupied, otherwise, it is free
-        self.prev_node_in_stack: Reference to the black node that is under the current pose in stack if the current node is black
-        self.next_node_in_stack: Reference to the black node that is above the current pose in stack if the current node is black
-        '''
-        self.name = "{}_{}".format(name, node_type)
-        self.object = name
-        self.type = node_type
-        # self.attached_red_nodes = []
-        self.target_black = []
-        self.done = False
-        self.occupied = False
-        self.prev_node_in_stack = None
-        self.next_node_in_stack = None
-        self.pose = None
-        self.pick_grasp_pose = None
-        self.place_grasp_pose = None
-        
-        self.pickable = False # Will be set to true if we get valid pick grasp and pose of the object (only for red node)
-        
-    def set_done(self):
-        self.done = True
-        self.type = 'b'
-        
-
 
 class TaskPlanner(object):
     """Plan object operation sequence for the whole task.
@@ -325,6 +505,10 @@ class TaskPlanner(object):
         
         # Occupancy map and buffer spot sampler class
         self.occ_and_buffer = OccupancyAndBuffer()
+
+
+        self.object_label_mesh_path_dict = {}
+        self.duplicate_object_real_label_dict = {}
         
         
         self.block_labels = blocks
@@ -335,8 +519,11 @@ class TaskPlanner(object):
         self.object_pick_grasp_pose_dict = {}
         self.object_place_grasp_pose_dict = {}
         self.detected_object_label_list = []
-        self.red_nodes = []
-        self.black_nodes = []
+        # self.red_nodes = []
+        # self.black_nodes = []
+
+        self.global_object_states = {} # <object_name>: {done: True/False, object_stack: list_of_other_objects, occupied:True/False, temp_done: True/False}
+        self.object_stacks = {}
         
         print("#"*40)
         print("Block labels: {}".format(self.block_labels))
@@ -370,6 +557,8 @@ class TaskPlanner(object):
             print("Poses type: {}".format(type(poses)))
             for i, pose in enumerate(poses.poses):
                 goal_pose_dict["{}_v{}".format(label, i)] = pose
+                self.object_label_mesh_path_dict["{}_v{}".format(label, i)] = '/root/ocrtoc_ws/src/ocrtoc_materials/models/{}/textured.obj'.format(label)
+                self.duplicate_object_real_label_dict["{}_v{}".format(label, i)] = label
             # goal_pose_dict[label] = pose
         return goal_pose_dict    
 
@@ -549,123 +738,123 @@ class TaskPlanner(object):
         '''
         return any([searchable in x for x in string_list])
     
-    def find_target_black_node(self, pose):
-        '''
-        Given a pose, find the black node that is associated with it
-        '''
-        for node in self.black_nodes:
-            if node.pose == pose:
-                return node
+    # def find_target_black_node(self, pose):
+    #     '''
+    #     Given a pose, find the black node that is associated with it
+    #     '''
+    #     for node in self.black_nodes:
+    #         if node.pose == pose:
+    #             return node
     
-    def initialize_target_black_nodes(self, object_name_list):
-        '''
-        Creates nodes for target poses. Includes the pose information in each of these black nodes
+    # def initialize_target_black_nodes(self, object_name_list):
+    #     '''
+    #     Creates nodes for target poses. Includes the pose information in each of these black nodes
         
-        Returns:
-        A list of black nodes, each containing a target pose
-        '''
-        black_nodes = []
-        for object_name in object_name_list:
-            bnode = RedBlackNode(name=object_name, node_type='b')
-            bnode.pose = self.object_goal_pose_dict[bnode.object]
-            black_nodes.append(bnode)
-        return black_nodes
+    #     Returns:
+    #     A list of black nodes, each containing a target pose
+    #     '''
+    #     black_nodes = []
+    #     for object_name in object_name_list:
+    #         bnode = RedBlackNode(name=object_name, node_type='b')
+    #         bnode.pose = self.object_goal_pose_dict[bnode.object]
+    #         black_nodes.append(bnode)
+    #     return black_nodes
     
-    def initialize_initial_red_nodes(self, object_name_list):
-        '''
-        Initializes the red nodes but does not add any pose information (as it is not collected yet)
+    # def initialize_initial_red_nodes(self, object_name_list):
+    #     '''
+    #     Initializes the red nodes but does not add any pose information (as it is not collected yet)
         
-        Returns:
-        A list of red nodes (without pose information)
-        '''
-        red_nodes = []
-        for object_name in object_name_list:
-            rnode = RedBlackNode(name=object_name, node_type='r')
-            rnode.target_black = [self.find_target_black_node(self.object_goal_pose_dict[rnode.object])]
-            red_nodes.append(rnode)
-        return red_nodes
+    #     Returns:
+    #     A list of red nodes (without pose information)
+    #     '''
+    #     red_nodes = []
+    #     for object_name in object_name_list:
+    #         rnode = RedBlackNode(name=object_name, node_type='r')
+    #         rnode.target_black = [self.find_target_black_node(self.object_goal_pose_dict[rnode.object])]
+    #         red_nodes.append(rnode)
+    #     return red_nodes
 
 
-    def update_red_nodes(self, detected_object_label_list):
-        '''
-        Here, we assume that object initial and grasp poses are provided to us. We add this information to the nodes
+    # def update_red_nodes(self, detected_object_label_list):
+    #     '''
+    #     Here, we assume that object initial and grasp poses are provided to us. We add this information to the nodes
         
-        Returns:
-        None
-        '''
-        for node in self.red_nodes:
-            if node.object in detected_object_label_list:
-                print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
-                if node.done == True or node.type == 'b':
-                    continue
-                node.pickable = True
-                node.pose = self.object_init_pose_dict[node.object]
-                node.pick_grasp_pose = self.object_pick_grasp_pose_dict[node.object]
-                node.place_grasp_pose = self.object_place_grasp_pose_dict[node.object]
+    #     Returns:
+    #     None
+    #     '''
+    #     for node in self.red_nodes:
+    #         if node.object in detected_object_label_list:
+    #             print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
+    #             if node.done == True or node.type == 'b':
+    #                 continue
+    #             node.pickable = True
+    #             node.pose = self.object_init_pose_dict[node.object]
+    #             node.pick_grasp_pose = self.object_pick_grasp_pose_dict[node.object]
+    #             node.place_grasp_pose = self.object_place_grasp_pose_dict[node.object]
 
-    def update_black_nodes(self, scene_point_cloud = [], occ_map = []):
-        '''
-        Currently, this function checks if a particular place is occupied or not and assigns occupancy statuses 
-        to the black nodes (target pose nodes). 
+    # def update_black_nodes(self, scene_point_cloud = [], occ_map = []):
+    #     '''
+    #     Currently, this function checks if a particular place is occupied or not and assigns occupancy statuses 
+    #     to the black nodes (target pose nodes). 
         
-        Stacking information: TO BE ADDED IN FUTURE (USING SCENE GRAPHS OR RELATED METHODS)
+    #     Stacking information: TO BE ADDED IN FUTURE (USING SCENE GRAPHS OR RELATED METHODS)
         
-        Parameters:
-        1. scene_point_cloud: PCD obtained from kinect/realsense
+    #     Parameters:
+    #     1. scene_point_cloud: PCD obtained from kinect/realsense
         
-        Returns:
-        None
-        '''
-        # 1. Get occupancy map
-        if len(occ_map) == 0:
-            print("Occupancy map building ...")
-            occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(scene_point_cloud.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
-            print("Occupancy map build!")
-        else:
-            print("Occupancy map recieved!")
-        # 2. Get path to materials
-        rospack = rospkg.RosPack()
-        materials_path = rospack.get_path('ocrtoc_materials')
-        print("Rospack path: {}*********************++++++++++++++++++++++++++++*************************+++++++++++++++++++++++++++".format(materials_path))
-        # 3. Generate occupancy maps for each of the objects and compare the two maps. 
-        #    If both the maps have entry '1' at any particular pixel, then the place is said to be occupied
-        # FUTURE: ADD TOLERANCE (Concept: It is okay to have few pixels occupied, as long as it is not too many (set some threshold))
-        pcds = []
-        for bnode in self.black_nodes:
-            if bnode.object in self.object_goal_pose_dict:
-                temp = bnode.object.split('_')
-                model_name = ''
-                for i in range(len(temp)-1):
-                    if i==0:
-                        model_name = model_name + temp[i]
-                    else:
-                        model_name = model_name + '_' + temp[i]
-                path_to_object_mesh = os.path.join(materials_path, 'models/{}/textured.obj'.format(model_name)) # visual.ply
-                # Reading textured mesh and transforming it to the actual goal pose
-                mesh = o3d.io.read_triangle_mesh(path_to_object_mesh)
-                pose = self.object_goal_pose_dict[bnode.object]
-                translation = np.array([pose.position.x, pose.position.y, pose.position.z]) - np.array(mesh.get_center())
-                orientation = (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z)
-                mesh.rotate(mesh.get_rotation_matrix_from_quaternion(orientation)) # center = True by default (implies rotation is applied w.r.t the center of the object)
-                mesh.translate((translation[0], translation[1], translation[2])) 
-                pcd =  mesh.sample_points_poisson_disk(1000, init_factor=5, pcl=None)
-                occ1 = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120, dir_path='/root/occ_map_{model_name}.png')
+    #     Returns:
+    #     None
+    #     '''
+    #     # 1. Get occupancy map
+    #     if len(occ_map) == 0:
+    #         print("Occupancy map building ...")
+    #         occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(scene_point_cloud.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
+    #         print("Occupancy map build!")
+    #     else:
+    #         print("Occupancy map recieved!")
+    #     # 2. Get path to materials
+    #     rospack = rospkg.RosPack()
+    #     materials_path = rospack.get_path('ocrtoc_materials')
+    #     print("Rospack path: {}*********************++++++++++++++++++++++++++++*************************+++++++++++++++++++++++++++".format(materials_path))
+    #     # 3. Generate occupancy maps for each of the objects and compare the two maps. 
+    #     #    If both the maps have entry '1' at any particular pixel, then the place is said to be occupied
+    #     # FUTURE: ADD TOLERANCE (Concept: It is okay to have few pixels occupied, as long as it is not too many (set some threshold))
+    #     pcds = []
+    #     for bnode in self.black_nodes:
+    #         if bnode.object in self.object_goal_pose_dict:
+    #             temp = bnode.object.split('_')
+    #             model_name = ''
+    #             for i in range(len(temp)-1):
+    #                 if i==0:
+    #                     model_name = model_name + temp[i]
+    #                 else:
+    #                     model_name = model_name + '_' + temp[i]
+    #             path_to_object_mesh = os.path.join(materials_path, 'models/{}/textured.obj'.format(model_name)) # visual.ply
+    #             # Reading textured mesh and transforming it to the actual goal pose
+    #             mesh = o3d.io.read_triangle_mesh(path_to_object_mesh)
+    #             pose = self.object_goal_pose_dict[bnode.object]
+    #             translation = np.array([pose.position.x, pose.position.y, pose.position.z]) - np.array(mesh.get_center())
+    #             orientation = (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z)
+    #             mesh.rotate(mesh.get_rotation_matrix_from_quaternion(orientation)) # center = True by default (implies rotation is applied w.r.t the center of the object)
+    #             mesh.translate((translation[0], translation[1], translation[2])) 
+    #             pcd =  mesh.sample_points_poisson_disk(1000, init_factor=5, pcl=None)
+    #             occ1 = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120, dir_path='/root/occ_map_{model_name}.png')
                 
-                amount_required_occ1 = np.sum(occ1)
-                # Check if occupied
-                amount_occupied = np.sum(np.logical_and(occ_map, occ1))
-                occ_perc = 100*float(amount_occupied)/float(amount_required_occ1)
-                if occ_perc > 5:
-                    bnode.occupied = True
-                else:
-                    bnode.occupied = False
-                # is_occupied = np.any(np.logical_and(occ_map, occ1))
-                # bnode.occupied = is_occupied
-                print("{} percentage of {}'s target pose is occupied".format(occ_perc, bnode.object))
-                print("So, occupied = {}".format(bnode.occupied))
-                # pcds.append(pcd)
-        # o3d.visualization.draw_geometries(pcds)
-        # exit(1)
+    #             amount_required_occ1 = np.sum(occ1)
+    #             # Check if occupied
+    #             amount_occupied = np.sum(np.logical_and(occ_map, occ1))
+    #             occ_perc = 100*float(amount_occupied)/float(amount_required_occ1)
+    #             if occ_perc > 5:
+    #                 bnode.occupied = True
+    #             else:
+    #                 bnode.occupied = False
+    #             # is_occupied = np.any(np.logical_and(occ_map, occ1))
+    #             # bnode.occupied = is_occupied
+    #             print("{} percentage of {}'s target pose is occupied".format(occ_perc, bnode.object))
+    #             print("So, occupied = {}".format(bnode.occupied))
+    #             # pcds.append(pcd)
+    #     # o3d.visualization.draw_geometries(pcds)
+    #     # exit(1)
         
         
     def get_color_image_frame_id(self):
@@ -744,6 +933,17 @@ class TaskPlanner(object):
         # import open3d as o3d
         # o3d.visualization.draw_geometries([pcd_kinect])
         return pcd_kinect
+
+    def create_global_object_dict(self):
+        for i, key in enumerate(self.object_stacks.keys()):
+            self.global_object_states[key] = {
+                'done': False,
+                'object_stack': self.object_stacks[key]['objects_under_it'],
+                'occupied': False,
+                'temp_done': False
+            }
+        print("Global object state dictionary: {}".format(self.global_object_states))
+
         
     def create_data_model(self, nodes):
         """Stores the data for the problem."""
@@ -932,37 +1132,219 @@ class TaskPlanner(object):
         plan = self.get_final_sequence_from_ORsolution(data, manager, routing, solution)
         return solution, plan
         # [END print_solution]
-    
-    def execute_plan(self, action_list, action_sequence_mapping):
-        '''Given the list of actions in sequence, execute them one by one and return the completed objects list
+
+    def check_if_parents_done(self, object_key, local_object_states):
+        '''If the given object is supposed to go into a stack, check if its detected parents are already done
         '''
-        success = False
-        completed_objects = []
+        # print("Object_key {}".format(object_key))
+        list_of_parents = self.global_object_states[object_key]['object_stack']
+        if len(list_of_parents)==0:
+            return True
+        print(list_of_parents)
+        print(type(list_of_parents))
+        for parent in list_of_parents:
+            if parent in self.detected_object_label_list:
+                if local_object_states[parent]['done']==True or local_object_states[parent]['temp_done']==True:
+                    continue
+                else:
+                    action = "done"
+                    f = open('/root/plan_result.txt', 'a')
+                    f.write("\nMy parents not completed ({} - is parent to - {})!".format(parent, object_key))
+                    f.close()
+                    return False
+        return True
+
+    def update_collision_statuses(self, debug=False):
+        '''Gets point cloud and updates target collision statuses for all the objects
+        '''
+        # 1. Generate point cloud
+        current_pcd = self.get_point_cloud_from_kinect()
+        print("Total number of points in pcd: {}".format(len(current_pcd.points)))
+        occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
+
+        if debug == True:
+            cv2.imshow('Occupancy map', (occ_map * 255).astype(np.uint8))
+            cv2.waitKey(0)
+            cv2.imwrite('root/scene_occ_map.png',(occ_map * 255).astype(np.uint8))
+
+        # 2. Get path to materials
+        rospack = rospkg.RosPack()
+        materials_path = rospack.get_path('ocrtoc_materials')
+        print("Rospack path: {}*********************++++++++++++++++++++++++++++*************************+++++++++++++++++++++++++++".format(materials_path))
+        # 3. Generate occupancy maps for each of the objects and compare the two maps. 
+        #    If both the maps have entry '1' at any particular pixel, then the place is said to be occupied
+        # FUTURE: ADD TOLERANCE (Concept: It is okay to have few pixels occupied, as long as it is not too many (set some threshold))
+        pcds = []
+        for object_name in self.detected_object_label_list:
+            temp = object_name.split('_')
+            print("Object name: {}\tObject split name: {}".format(object_name, temp))
+            model_name = ''
+            for i in range(len(temp)-1):
+                if i==0:
+                    model_name = model_name + temp[i]
+                else:
+                    model_name = model_name + '_' + temp[i]
+
+            path_to_object_mesh = os.path.join(materials_path, 'models/{}/textured.obj'.format(model_name)) # visual.ply
+            # Reading textured mesh and transforming it to the actual goal pose
+            mesh = o3d.io.read_triangle_mesh(path_to_object_mesh)
+            pose = self.object_goal_pose_dict[object_name]
+            translation = np.array([pose.position.x, pose.position.y, pose.position.z]) - np.array(mesh.get_center())
+            orientation = (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z)
+            mesh.rotate(mesh.get_rotation_matrix_from_quaternion(orientation)) # center = True by default (implies rotation is applied w.r.t the center of the object)
+            mesh.translate((translation[0], translation[1], translation[2])) 
+            pcd =  mesh.sample_points_poisson_disk(1000, init_factor=5, pcl=None)
+            occ1 = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120, dir_path='/root/occ_map_{model_name}.png')
+            
+            amount_required_occ1 = np.sum(occ1)
+            if debug==True:
+                cv2.imshow('Object Occupancy map', (occ1 * 255).astype(np.uint8))
+                cv2.waitKey(0)
+                cv2.imwrite('root/object_occ_map.png',(occ_map * 255).astype(np.uint8))
+            # Check if occupied
+            amount_occupied = np.sum(np.logical_and(occ_map, occ1))
+
+            if debug==True:
+                cv2.imshow('Resultant Occupancy map', (np.logical_and(occ_map, occ1) * 255).astype(np.uint8))
+                cv2.waitKey(0)
+                cv2.imwrite('root/resultant_occ_map.png',(occ_map * 255).astype(np.uint8))
+
+            occ_perc = 100*float(amount_occupied)/float(amount_required_occ1)
+            if occ_perc > 5:
+                self.global_object_states[object_name]['occupied'] = True
+            else:
+                self.global_object_states[object_name]['occupied'] = False
+            # is_occupied = np.any(np.logical_and(occ_map, occ1))
+            # bnode.occupied = is_occupied
+            print("{} percentage of {}'s target pose is occupied".format(occ_perc, object_name))
+            print("So, occupied = {}".format(self.global_object_states[object_name]['occupied']))
+
+
+    def get_next_best_action(self, action_list, action_sequence_mapping):
+        '''Gets the next best action
+        '''   
+        self.update_collision_statuses(debug=False)
+
+        done = True
         for action in action_list:
             name = action_sequence_mapping[str(action)]['name']
             object_name = action_sequence_mapping[str(action)]['object']
-            if self.search_strings([name], searchable='pick'):
-                print("Going to pick {}\t|\t".format(object_name))
-                self._motion_planner.fake_place()
-                success = self.go_pick_object(object_name=object_name)
-                 # 3. Check if the object is grapsed
-                # success = self.gripper_width_test()
-                                     
-                if success == False:
-                    print("Pick failed")
+            if name=="rest_pose": # or object_name==None:
+                continue
+            print("Global object states: {}\nObject name: {}".format(self.global_object_states, object_name))
+            if self.global_object_states[object_name]['done'] == True or self.global_object_states[object_name]['temp_done']==True:
+                continue
+            done = False
+            if len(self.global_object_states[object_name]['object_stack']) == 0: # No parents in the stack
+                if self.global_object_states[object_name]['occupied'] == True:
+                    continue
                 else:
-                    print("Pick success")
-            elif self.search_strings([name], searchable='place') and success==True:
+                    return action
+            elif self.check_if_parents_done(object_name, self.global_object_states) == True: # self.global_object_states[object_name]
+                return action 
+        
+        # If the program reaches this point, it implies that either all the objects are done, or all the objects have partially occupied targets
+        if done == True:
+            action = "done"
+            f = open('/root/plan_result.txt', 'a')
+            f.write("\nDone!".format(name, object_name))
+            f.close()
+
+            return action
+        
+        # Get any undone object
+        for action in action_list:
+            name = action_sequence_mapping[str(action)]['name']
+            object_name = action_sequence_mapping[str(action)]['object']
+            if name=="rest_pose": # or object_name==None:
+                continue
+            if self.global_object_states[object_name]['done'] == True or self.global_object_states[object_name]['temp_done']==True:
+                continue
+            if self.check_if_parents_done(object_name, self.global_object_states) == True: # self.global_object_states[object_name]
+                return action 
+
+        action = "done"
+        return action
+    
+    def execute_plan(self, action_list, action_sequence_mapping):
+        '''Given the list of actions in sequence, execute them one by one and return the completed objects list
+
+        '''
+        success = False
+        completed_objects = []
+
+        done = False
+
+        # f = open('/root/plan_result.txt', 'a')
+        # f.close()
+
+        while not done:
+            action = self.get_next_best_action(action_list, action_sequence_mapping)
+            if action == "done":
+                done = True
+                continue
+
+            name = action_sequence_mapping[str(action)]['name']
+            object_name = action_sequence_mapping[str(action)]['object']
+
+            f = open('/root/plan_result.txt', 'a')
+            f.write("\nAction_name: {}\tObject name: {}".format(name, object_name))
+            f.close()
+
+            buffer_pose = None
+
+            # If target is partially or fully occupied, sample a buffer spot
+            if self.global_object_states[object_name]['occupied'] == True and len(self.global_object_states[object_name]['object_stack'])==0:
+                f = open('/root/plan_result.txt', 'a')
+                f.write("\nGoing for a buffer spot due to partial occupancy")
+                f.close()
+                position = self.object_goal_pose_dict[object_name].position
+                orientation = self.object_goal_pose_dict[object_name].orientation
+                target_cart_pose = np.array([position.x, position.y, position.z,
+                                             orientation.x, orientation.y, 
+                                             orientation.z, orientation.w])
+                print("object_mesh_path={}".format(self.object_label_mesh_path_dict[object_name]))
+                current_pcd = self.get_point_cloud_from_kinect()
+                buffer_spot_2d = self.occ_and_buffer.marching_grid(scene_pcd=current_pcd, object_mesh_path=self.object_label_mesh_path_dict[object_name],
+                                                                   target_pose_6D= target_cart_pose, OCC_THRESH=1.0, scene_name='-', object_name='-')
+                # buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
+                buffer_pose = copy.deepcopy(self.object_init_pose_dict[object_name])
+                buffer_pose.position.x = buffer_spot_2d[0]
+                buffer_pose.position.y = buffer_spot_2d[1]
+
+            # pick object
+            print("Going to pick {}\t|\t".format(object_name))
+            self._motion_planner.fake_place()
+            success = self.go_pick_object(object_name=object_name)
+            self.global_object_states[object_name]['temp_done'] = True
+            if success == False:
+                print("Pick failed")
+            else:
+                print("Pick success")
+
+            # place object
+            if success == True:
                 print("Going to place {}\t|\t".format(object_name))
-                success = self.go_place_object(object_name)
+                success = self.go_place_object(object_name, final_place_pose=buffer_pose)
                 if success == False:
                     print("Place failed")
                 else:
                     print("Place success")
                     completed_objects.append(object_name)
+                    self.global_object_states[object_name]['done'] = True
+
+            f = open('/root/plan_result.txt', 'a')
+            f.write("\nAction_success: {}\n-----------------------------------------------------------------\n".format(success))
+            f.close()
+
         return completed_objects
             
-        
+    def set_temp_status_not_done(self):
+        '''This function sets the temp_done status for each object as False
+        '''
+        for i, key in enumerate(self.global_object_states.keys()):
+            self.global_object_states[key]['temp_done'] = False
+
     # get poses of part of objects each call of perception node, call perception node and plan task several times
     def cycle_plan_all(self):
         """Plan object operation sequence and execute operations recurrently.
@@ -978,22 +1360,60 @@ class TaskPlanner(object):
         left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
         # Remove clear_box from the list of movable objects
-        temp = []
-        for object in left_object_labels:
-            if self.search_strings2(object, ['clear_box', 'book', 'round_plate', 'plate_holder']):
-                continue
-            temp.append(object)
-        left_object_labels = copy.deepcopy(temp)
+        # temp = []
+        # for object in left_object_labels:
+        #     if self.search_strings2(object, ['clear_box', 'book', 'round_plate', 'plate_holder']):
+        #         continue
+        #     temp.append(object)
+        # left_object_labels = copy.deepcopy(temp)
+
+        import pickle
+        object_dict = {}
+        for i, key in enumerate(self.object_goal_pose_dict.keys()):
+            position = self.object_goal_pose_dict[key].position
+            p = [position.x, position.y, position.z]
+            orientation = self.object_goal_pose_dict[key].orientation
+            o = [orientation.w, orientation.x, orientation.y, orientation.z]
+            posep = []
+            for pi in p:
+                posep.append(pi)
+            for oi in o:
+                posep.append(oi)
+            object_dict[key] = {
+                'object_label': self.duplicate_object_real_label_dict[key],
+                'pose': posep
+            }
+        OBJECT_DIR_PATH = '/root/ocrtoc_ws/src/stack_detection/object_dict.npz'
+        MESH_DIR = '/root/ocrtoc_ws/src/ocrtoc_materials/models/'
+        SAVE_PATH = '/root/ocrtoc_ws/src/stack_detection/scene_dict.npz' 
+        # np.savez_compressed(OBJECT_DIR_PATH, data=object_dict)
+        with open(OBJECT_DIR_PATH, 'wb') as f:
+            pickle.dump(object_dict, f)
+        print("Running stack detection")
+        command = '/root/ocrtoc_ws/src/stack_detection/run_script.sh {} {} {}'.format(OBJECT_DIR_PATH, MESH_DIR, SAVE_PATH)
+        os.system(command)
+        # 1.1. Load the dictionary and convert it into object stack dictionary 
+        with open(SAVE_PATH, 'rb') as f:
+            self.object_stacks = pickle.load(f)     
+
+        # 1.2 Create the global object dictionary using stack information
+        self.create_global_object_dict()
              
                    
         # 1. Create black nodes for target poses
         # self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
         # 2. Create red nodes for initial poses
         # self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
+
+        f = open('/root/plan_result.txt', 'w+')
+        f.close()
             
         count = 0
         label_count = 1
         while len(left_object_labels) > 0 and count <= 5:
+
+            self.set_temp_status_not_done()
+
             count += 1
             # 3. Get information about left objects from perception node
             
@@ -1002,6 +1422,10 @@ class TaskPlanner(object):
             rospy.loginfo('Try to get information of left objects from perception node')
             self.get_pose_perception(left_object_labels)
             print("Detected object list: {}".format(self.detected_object_label_list))
+
+            f = open('/root/plan_result.txt', 'a')
+            f.write("\nRound number: {}\nDetected object list: {}".format(count, self.detected_object_label_list))
+            f.close()
 
             # 4. Create pick and place grasp pose lists and final list of nodes
             rest_pose = Pose()
@@ -1032,6 +1456,9 @@ class TaskPlanner(object):
             
             self.detected_object_label_list = detected_object_list
             
+            f = open('/root/plan_result.txt', 'a')
+            f.write("\nObject list for the current round: {}".format(self.detected_object_label_list))
+            f.close()
             
             n_detected_objects = len(self.detected_object_label_list )
             print(self.detected_object_label_list)
@@ -1085,6 +1512,10 @@ class TaskPlanner(object):
             
             # 8. Execute plan
             completed_objects = self.execute_plan(plan, action_sequence_mapping)
+
+            f = open('/root/plan_result.txt', 'a')
+            f.write("\nCompleted objects: {}".format(completed_objects))
+            f.close()
             
             # 9. Remove completed objects
             temp = []
@@ -1095,9 +1526,16 @@ class TaskPlanner(object):
             left_object_labels = temp
             print("left objects: {}".format(left_object_labels))
 
+            f = open('/root/plan_result.txt', 'a')
+            f.write("\nLeft objects: {}\n===============================================================================\n".format(left_object_labels))
+            f.close()
+
             print("************************Iteration {}***********************************************".format(count))
             
             self._motion_planner.to_rest_pose()
+
+            if len(left_object_labels)==0:
+                break
             
             
     def find_red_node(self, node_list):
@@ -1117,100 +1555,100 @@ class TaskPlanner(object):
                 return node
         return None
 
-    def solve(self, occ_map = []):
-        '''Solver
-        Somewhat DFS
-        '''
-        # dfs 
-        completed_objects = []
-        if len(occ_map) == 0:
-            print("No occupancy map recieved, no buffer spots will be generated")
-        sequence = []
-        done = False
-        nodes = self.red_nodes
-        # head = self.find_red_node(nodes)
-        counter = 3
-        while (not done) and counter > 0:
-            current_pcd = self.get_point_cloud_from_kinect()
-            print("Total number of points in pcd: {}".format(len(current_pcd.points)))
-            occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
-            self.update_black_nodes(current_pcd, occ_map)
+    # def solve(self, occ_map = []):
+    #     '''Solver
+    #     Somewhat DFS
+    #     '''
+    #     # dfs 
+    #     completed_objects = []
+    #     if len(occ_map) == 0:
+    #         print("No occupancy map recieved, no buffer spots will be generated")
+    #     sequence = []
+    #     done = False
+    #     nodes = self.red_nodes
+    #     # head = self.find_red_node(nodes)
+    #     counter = 3
+    #     while (not done) and counter > 0:
+    #         current_pcd = self.get_point_cloud_from_kinect()
+    #         print("Total number of points in pcd: {}".format(len(current_pcd.points)))
+    #         occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
+    #         self.update_black_nodes(current_pcd, occ_map)
             
-            head = self.find_red_node(nodes)
+    #         head = self.find_red_node(nodes)
             
-            if head == None:
-                if len(occ_map) == 0:
-                    done = True
-                    continue
-                head = self.just_find_red(nodes)
-                if head == None:
-                    done = True
-                    continue
-                buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
-                buffer.occupied = copy.deepcopy(head.occupied)
-                buffer.target_black = [head.target_black[0]]
-                buffer.done = False
-                # buffer.attached_red_nodes= head.attached_red_nodes
-                head.done = True
-                head.type = 'b'
-                print(occ_map)
-                target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y])
-                buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
-                buffer_pose = copy.deepcopy(self.object_init_pose_dict[head.object])
-                buffer_pose.position.x = buffer_spot_2d[0]
-                buffer_pose.position.y = buffer_spot_2d[1]
-                buffer.pickable = False
+    #         if head == None:
+    #             if len(occ_map) == 0:
+    #                 done = True
+    #                 continue
+    #             head = self.just_find_red(nodes)
+    #             if head == None:
+    #                 done = True
+    #                 continue
+    #             buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
+    #             buffer.occupied = copy.deepcopy(head.occupied)
+    #             buffer.target_black = [head.target_black[0]]
+    #             buffer.done = False
+    #             # buffer.attached_red_nodes= head.attached_red_nodes
+    #             head.done = True
+    #             head.type = 'b'
+    #             print(occ_map)
+    #             target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y])
+    #             buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
+    #             buffer_pose = copy.deepcopy(self.object_init_pose_dict[head.object])
+    #             buffer_pose.position.x = buffer_spot_2d[0]
+    #             buffer_pose.position.y = buffer_spot_2d[1]
+    #             buffer.pickable = False
                 
-                # Pick and place in buffer
-                print("Generated buffer. Now, pick and place the object in buffer spot!")
-                res = self.go_pick_object(object_name=head.object)
-                # if res == True:
-                self.go_place_object(object_name=head.object, final_place_pose=buffer_pose)
-                print("Placed in buffer!")
-                # import time
-                # time.sleep(1)
-                # rospy.sleep(1)
+    #             # Pick and place in buffer
+    #             print("Generated buffer. Now, pick and place the object in buffer spot!")
+    #             res = self.go_pick_object(object_name=head.object)
+    #             # if res == True:
+    #             self.go_place_object(object_name=head.object, final_place_pose=buffer_pose)
+    #             print("Placed in buffer!")
+    #             # import time
+    #             # time.sleep(1)
+    #             # rospy.sleep(1)
                 
-                sequence.append(head.name)
-                sequence.append(buffer.name)
-                buffer.prev_node_in_stack = head.prev_node_in_stack
-                buffer.next_node_in_stack = head.next_node_in_stack
-                if head.next_node_in_stack != None:
-                    head.next_node_in_stack.prev_node_in_stack = buffer
-                if head.prev_node_in_stack != None:
-                    head.prev_node_in_stack.next_node_in_stack = buffer
+    #             sequence.append(head.name)
+    #             sequence.append(buffer.name)
+    #             buffer.prev_node_in_stack = head.prev_node_in_stack
+    #             buffer.next_node_in_stack = head.next_node_in_stack
+    #             if head.next_node_in_stack != None:
+    #                 head.next_node_in_stack.prev_node_in_stack = buffer
+    #             if head.prev_node_in_stack != None:
+    #                 head.prev_node_in_stack.next_node_in_stack = buffer
 
-                # head = self.find_red_node(nodes)
-                nodes.append(buffer)
-                # self.red_nodes.append(buffer)
-                # nodes_labelled.append((buffer, 0))
-                print("*************************++++++++**************************\nSequence: {}".format(sequence))
-                # counter -= 1
-                continue
-            # print("Node: {}".format(head.name))
-            # Find an undone red
-            print("Picking and placing in target pose (since target pose is empty!)")
-            self.go_pick_object(object_name=head.object)
-            self.go_place_object(object_name=head.object)
-            print("Placed in target pose!")
-            sequence.append(head.name)
-            sequence.append(head.target_black[0].name)
-            head.type = 'b'
-            head.done = True
-            head.target_black[0].done = True
+    #             # head = self.find_red_node(nodes)
+    #             nodes.append(buffer)
+    #             # self.red_nodes.append(buffer)
+    #             # nodes_labelled.append((buffer, 0))
+    #             print("*************************++++++++**************************\nSequence: {}".format(sequence))
+    #             # counter -= 1
+    #             continue
+    #         # print("Node: {}".format(head.name))
+    #         # Find an undone red
+    #         print("Picking and placing in target pose (since target pose is empty!)")
+    #         self.go_pick_object(object_name=head.object)
+    #         self.go_place_object(object_name=head.object)
+    #         print("Placed in target pose!")
+    #         sequence.append(head.name)
+    #         sequence.append(head.target_black[0].name)
+    #         head.type = 'b'
+    #         head.done = True
+    #         head.target_black[0].done = True
             
-            completed_objects.append(head.object)
-            # head = self.find_red_node(nodes)
-            # if head == None:
-            #     done = True
-            print("Sequence: {}".format(sequence))
-            # counter -= 1
+    #         completed_objects.append(head.object)
+    #         # head = self.find_red_node(nodes)
+    #         # if head == None:
+    #         #     done = True
+    #         print("Sequence: {}".format(sequence))
+    #         # counter -= 1
             
-        print('Sequence: {}'.format(sequence))  
-        print("Completed objects: {}".format(completed_objects))
-        print(" red nodes: {}".format(self.red_nodes))
-        print("Nodes: {}".format(nodes))
-        return completed_objects
+    #     print('Sequence: {}'.format(sequence))  
+    #     print("Completed objects: {}".format(completed_objects))
+    #     print(" red nodes: {}".format(self.red_nodes))
+    #     print("Nodes: {}".format(nodes))
+    #     return completed_objects
 
     def go_pick_object(self, object_name):
         '''
