@@ -1,2 +1,15 @@
 Task name: 2-2-1 | Scene mean score: 0.218273853065 | Time cost: 602.009241104
 Task name: 2-2-1 | Scene mean score: 0.172360953736 | Time cost: 602.011595964
+Task name: 1-1-1 | Scene mean score: 0.339740559887 | Time cost: 13.8293378353
+Task name: 1-1-1 | Scene mean score: 0.339772993138 | Time cost: 10.6193678379
+Task name: 1-1-1 | Scene mean score: 0.340044569272 | Time cost: 164.333522081
+Task name: 1-1-1 | Scene mean score: 0.339786256003 | Time cost: 602.010084152
+Task name: 1-1-1 | Scene mean score: 0.339503283134 | Time cost: 165.835745096
+Task name: 1-1-1 | Scene mean score: 0.339681225448 | Time cost: 166.637624979
+Task name: 1-1-1 | Scene mean score: 0.339670039852 | Time cost: 170.642671108
+Task name: 1-1-1 | Scene mean score: 0.339207522033 | Time cost: 186.054144859
+Task name: 1-1-1 | Scene mean score: 0.338984896315 | Time cost: 166.725233078
+Task name: 1-1-1 | Scene mean score: 0.338981063681 | Time cost: 182.122162819
+Task name: 6-1-1 | Scene mean score: 0.217905005967 | Time cost: 180.667554855
+Task name: 6-1-1 | Scene mean score: 0.217189605531 | Time cost: 183.831954956
+Task name: 6-1-1 | Scene mean score: 0.217362486661 | Time cost: 224.618741989

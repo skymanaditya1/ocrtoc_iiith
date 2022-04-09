@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 
-'''ORTOOLS based Task planner
-Uses OR-Tools to find a an optimal task plan 
-Team RRC
+'''ORTOOLS + scene-stacking based Task planner
+Uses OR-Tools to find a an optimal task plan. Then finds the object-stacking information and uses it to reform the generated plan,
+so that it takes stacking order of the objects into consideration.
+
+No buffer positions are used while planning, or while placing the objects.
+Team Lumos
 Author: Vishal Reddy Mandadi
 '''
 
@@ -11,6 +14,7 @@ import argparse
 import copy
 import math
 from platform import node
+from threading import local
 from unicodedata import name
 import numpy as np
 import transforms3d
@@ -325,7 +329,10 @@ class TaskPlanner(object):
         
         # Occupancy map and buffer spot sampler class
         self.occ_and_buffer = OccupancyAndBuffer()
-        
+
+
+        self.object_label_mesh_path_dict = {}
+        self.duplicate_object_real_label_dict = {}
         
         self.block_labels = blocks
         self.object_goal_pose_dict = self.get_goal_pose_dict(self.block_labels, goal_cartesian_poses)
@@ -337,6 +344,10 @@ class TaskPlanner(object):
         self.detected_object_label_list = []
         self.red_nodes = []
         self.black_nodes = []
+
+
+        self.global_object_states = {} # <object_name>: {done: True/False, object_stack: list_of_other_objects}
+        self.object_stacks = {}
         
         print("#"*40)
         print("Block labels: {}".format(self.block_labels))
@@ -370,6 +381,8 @@ class TaskPlanner(object):
             print("Poses type: {}".format(type(poses)))
             for i, pose in enumerate(poses.poses):
                 goal_pose_dict["{}_v{}".format(label, i)] = pose
+                self.object_label_mesh_path_dict["{}_v{}".format(label, i)] = '/root/ocrtoc_ws/src/ocrtoc_materials/models/{}/textured.obj'.format(label)
+                self.duplicate_object_real_label_dict["{}_v{}".format(label, i)] = label
             # goal_pose_dict[label] = pose
         return goal_pose_dict    
 
@@ -744,6 +757,14 @@ class TaskPlanner(object):
         # import open3d as o3d
         # o3d.visualization.draw_geometries([pcd_kinect])
         return pcd_kinect
+
+    def create_global_object_dict(self):
+        for i, key in enumerate(self.object_stacks.keys()):
+            self.global_object_states[key] = {
+                'done': False,
+                'object_stack': self.object_stacks[key]['objects_under_it']
+            }
+        print("Global object state dictionary: {}".format(self.global_object_states))
         
     def create_data_model(self, nodes):
         """Stores the data for the problem."""
@@ -932,7 +953,47 @@ class TaskPlanner(object):
         plan = self.get_final_sequence_from_ORsolution(data, manager, routing, solution)
         return solution, plan
         # [END print_solution]
+
+    def check_if_parents_done(self, object_key, local_object_states):
+        '''If the given object is supposed to go into a stack, check if its detected parents are already done
+        '''
+        # print("Object_key {}".format(object_key))
+        list_of_parents = object_key['object_stack']
+        print(list_of_parents)
+        print(type(list_of_parents))
+        for parent in list_of_parents:
+            if parent in self.detected_object_label_list:
+                if local_object_states[parent]['done']==True:
+                    continue
+                else:
+                    return False
+        return True
     
+    def reform_the_plan(self, plan, action_sequence_mapping):
+        '''Reform the given plan by using the stacking information
+        '''
+        local_object_states = copy.deepcopy(self.global_object_states)
+        reformed_plan = copy.deepcopy(plan)
+        # print("Local object states: {}".format(local_object_states))
+        for action in plan:
+            name = action_sequence_mapping[str(action)]['name']
+            object_name = action_sequence_mapping[str(action)]['object']
+            # print("Action: {}\nAction mapping sequence: {}".format(action, action_sequence_mapping))
+            # print("Name: {}\nObject Name: {}\nGlobal object states: {}".format(name, object_name, self.global_object_states))
+            if object_name == None:
+                local_object_states[object_name]['done'] = True
+                continue
+            if name == "rest_pose":
+                # local_object_states[object_name]['done'] = True
+                continue
+            if self.check_if_parents_done(self.global_object_states[object_name], local_object_states) == True:
+                local_object_states[object_name]['done'] = True
+                continue
+            else:
+                reformed_plan.remove(action)
+                reformed_plan.append(action)
+        return reformed_plan
+
     def execute_plan(self, action_list, action_sequence_mapping):
         '''Given the list of actions in sequence, execute them one by one and return the completed objects list
         '''
@@ -978,13 +1039,47 @@ class TaskPlanner(object):
         left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
         # Remove clear_box from the list of movable objects
-        temp = []
-        for object in left_object_labels:
-            if self.search_strings2(object, ['clear_box', 'book', 'round_plate', 'plate_holder']):
-                continue
-            temp.append(object)
-        left_object_labels = copy.deepcopy(temp)
+        # temp = []
+        # for object in left_object_labels:
+        #     if self.search_strings2(object, ['clear_box', 'book', 'round_plate', 'plate_holder']):
+        #         continue
+        #     temp.append(object)
+        # left_object_labels = copy.deepcopy(temp)
              
+
+        # 1. Get target scene stack information
+        # 1.1 Generate the object stack information
+        import pickle
+        object_dict = {}
+        for i, key in enumerate(self.object_goal_pose_dict.keys()):
+            position = self.object_goal_pose_dict[key].position
+            p = [position.x, position.y, position.z]
+            orientation = self.object_goal_pose_dict[key].orientation
+            o = [orientation.w, orientation.x, orientation.y, orientation.z]
+            posep = []
+            for pi in p:
+                posep.append(pi)
+            for oi in o:
+                posep.append(oi)
+            object_dict[key] = {
+                'object_label': self.duplicate_object_real_label_dict[key],
+                'pose': posep
+            }
+        OBJECT_DIR_PATH = '/root/ocrtoc_ws/src/stack_detection/object_dict.npz'
+        MESH_DIR = '/root/ocrtoc_ws/src/ocrtoc_materials/models/'
+        SAVE_PATH = '/root/ocrtoc_ws/src/stack_detection/scene_dict.npz' 
+        # np.savez_compressed(OBJECT_DIR_PATH, data=object_dict)
+        with open(OBJECT_DIR_PATH, 'wb') as f:
+            pickle.dump(object_dict, f)
+        print("Running stack detection")
+        command = '/root/ocrtoc_ws/src/stack_detection/run_script.sh {} {} {}'.format(OBJECT_DIR_PATH, MESH_DIR, SAVE_PATH)
+        os.system(command)
+        # 1.1. Load the dictionary and convert it into object stack dictionary 
+        with open(SAVE_PATH, 'rb') as f:
+            self.object_stacks = pickle.load(f)     
+
+        # 1.2 Create the global object dictionary using stack information
+        self.create_global_object_dict()
                    
         # 1. Create black nodes for target poses
         # self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
@@ -1080,11 +1175,20 @@ class TaskPlanner(object):
                 print(action)
                 print('{}-->'.format(action_sequence_mapping[str(action)]['name']))
             print("End!")
+
+            print("Reform the plan using stacking information -------------------------------------------------------------------")
+            # 8. Reform the plan
+            reformed_plan = self.reform_the_plan(plan, action_sequence_mapping)
+            print("Reformed plan: {}".format(reformed_plan))
+            for action in reformed_plan:
+                print(action)
+                print('{}-->'.format(action_sequence_mapping[str(action)]['name']))
+            print("End!")
             
             print("Executing the plan!")
             
             # 8. Execute plan
-            completed_objects = self.execute_plan(plan, action_sequence_mapping)
+            completed_objects = self.execute_plan(reformed_plan, action_sequence_mapping)
             
             # 9. Remove completed objects
             temp = []

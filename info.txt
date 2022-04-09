@@ -1,0 +1,11 @@
+This is the branch 1, created on 9th of April. This builds up on 24th March submission, to include scene-stacking into consideration while generating a single-time plan.
+
+Method: Generate the plan using or-tools, then edit the sequence using the obtained stack information
+
+- No buffer places (as buffer position usage reduces our score in many scenes (only about 4 or 5 require buffer places, which again depends on perfect detection (chances of all-object detection is pretty low for such scenes, so the net effect is low)))
+- Perfect for sapien
+
+Handles:
+	1. Scene stacking
+
+Does not handle anything related to buffer positions and swapping.
