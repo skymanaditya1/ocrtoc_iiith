@@ -48,6 +48,10 @@ from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
+# Imports for buffer sampling
+from scipy import signal
+from scipy.spatial.transform import Rotation
+
 
 # Stacking related functions
 class SGNode:
@@ -170,6 +174,7 @@ class Object:
         '''
         self.mesh = o3d.io.read_triangle_mesh(mesh_path)
         self.copy_mesh = None
+        self.kernel_map = np.array([])
     
     def render_to_pose(self, object_pose):
         '''
@@ -201,6 +206,30 @@ class Object:
         '''
         self.render_to_pose(object_pose=object_pose)
         return self.get_pcd_from_copy_mesh(n_pts=n_pts)
+
+    def get_occupancy_map_kernel(self, target_6D_pose, occupancy_buffer, debug=False):
+        '''Create an occupancy map of the object centered at [0, 0]. Use this as a kernel for collision checking
+        Size differs from object to object (it is like a tightly fitting bounding box)
+
+        Parameters:
+        target_6D_pose = list of 6 coordinates [x, y, z, roll, pitch, yaw] 
+
+        Return:
+        kernel_map = 2D numpy array (occupancy maps with 0s and 1s)
+        occupancy_and_buffer: OccupancyAndBuffer class object
+        '''
+        # 1. Create a canonical pose with orienation and z value similar to target 6d pose
+        canonical_pose = [ 0.0, 0.0, target_6D_pose[2], target_6D_pose[3], target_6D_pose[4], target_6D_pose[5]]
+        entity_pcd = self.render_to_pose_and_get_pcd(object_pose=canonical_pose)
+        entity_omap = occupancy_buffer.generate_2D_occupancy_map(world_dat = np.asarray(entity_pcd.points)*100, threshold=1, dir_path='./results/object_{}-{}.png'.format('2-2-2', 'green_bowl'), save=True)
+        if debug==True:
+            print("Shape: {}".format(entity_omap.shape))
+            print(entity_omap)
+            cv2.imshow("occupancy map", (entity_omap * 255).astype(np.uint8))
+            cv2.waitKey(0)
+        
+        self.kernel_map = entity_omap
+
     
 class OccupancyAndBuffer:
     def __init__(self):
@@ -380,6 +409,66 @@ class OccupancyAndBuffer:
         print("Actual spot: {}".format(target_pose_6D))
 
         return buffer_spot
+
+    def convolutional_buffer_sampler(self, scene_omap, entity_omap, target_6D_pose, object_mesh_path='', scene_name='-', object_name='-', debug=False):
+        '''Convolutional Buffer Sampler
+        Samples buffer spot by fast-occupancy-collision checking using the convolution operation
+        Parameters:
+        scene_omap: Occupancy map of the scene (usually of size 60*120)
+        entity_omap: Occupancy map of the target object (usually of varying sizes (of order 10*20 or so))
+        target_6D_pose: The target goal pose of the object (closest to which should be our sampled spot)
+        '''
+        # Convolve scene map with kernel map by adding 'same' padding (with padding value=1 (not zero, to prevent boundary placements))
+        convolved_omap = signal.convolve2d(scene_omap, entity_omap, mode='same', boundary='fill', fillvalue=1)
+
+        max_val = np.amax(convolved_omap)
+        min_val = np.amin(convolved_omap)
+        print("Minimum occupancy in the scene: {}".format(min_val))
+        print("Indices of positions with min occupied value: {}".format(np.where(convolved_omap <= min_val)))
+
+        min_indices = np.where(convolved_omap <= min_val)
+        print('Min indices shape: {}'.format(min_indices[0].shape))
+
+        if debug==True:
+            cv2.imshow("Convolved map", (convolved_omap/(max_val)* 255).astype(np.uint8))
+            cv2.waitKey(0)
+            cv2.imwrite('./results/convolved_{}-{}.png'.format('2-2-2', 'green_bowl'), (convolved_omap/(max_val)* 255).astype(np.uint8))
+
+        # Get the closest optimal spot
+        nrows, ncols = convolved_omap.shape
+        target_2d = np.array([target_6D_pose[0], target_6D_pose[1]])
+        min_dist = 0.6*0.6 + 1.2*1.2
+        min_pos = np.array([-1, -1])
+        for i in range(nrows):
+            for j in range(ncols):
+                if convolved_omap[i][j] == min_val:
+                    current_pos = np.array([float(i)/100 - 0.3, float(j)/100 - 0.6])
+                    dist_to_target = np.linalg.norm(current_pos - target_2d)
+                    # print("dist to the target: {}".format(dist_to_target))
+                    if dist_to_target < min_dist:
+                        min_pos = current_pos
+                        min_dist = dist_to_target
+        
+        # Check if the returned pos is valid
+        print("Predicted min pos: {}".format(min_pos))
+        if min_pos[0] < 0.33 and min_pos[0] > -0.33:
+            if min_pos[1] < 0.63 and min_pos[1] > -0.63:
+                if debug==True:
+                    if object_mesh_path=='':
+                        print("Invalid object mesh path in debug mode")
+                        exit()
+                    buffer_spot = [min_pos[0], min_pos[1], target_6D_pose[2], target_6D_pose[3], target_6D_pose[4], target_6D_pose[5]]
+                    entity = Object(mesh_path=object_mesh_path)
+                    entity_pcd = entity.render_to_pose_and_get_pcd(object_pose=buffer_spot)
+                    entity_omap = self.generate_2D_occupancy_map(world_dat = np.asarray(entity_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120, threshold=1, dir_path='./results/object_{}-{}.png'.format('2-2-2', 'green_bowl'), save=True)
+                    fused_omap = np.logical_or(entity_omap, scene_omap)
+
+                    cv2.imshow("Buffer spotted!", (fused_omap * 255).astype(np.uint8))
+                    cv2.waitKey(0)
+                    cv2.imwrite('./results/buffer_{}-{}.png'.format(scene_name, 'green_bowl'),(fused_omap * 255).astype(np.uint8))
+                return min_pos
+
+        return []
     
     
     def get_empty_spot(self, pcd = [], occ_map = [], closest_target = np.array([])):
@@ -524,6 +613,8 @@ class TaskPlanner(object):
 
         self.global_object_states = {} # <object_name>: {done: True/False, object_stack: list_of_other_objects, occupied:True/False, temp_done: True/False}
         self.object_stacks = {}
+
+        self.object_entities = {}
         
         print("#"*40)
         print("Block labels: {}".format(self.block_labels))
@@ -737,124 +828,6 @@ class TaskPlanner(object):
         Bool: True/False
         '''
         return any([searchable in x for x in string_list])
-    
-    # def find_target_black_node(self, pose):
-    #     '''
-    #     Given a pose, find the black node that is associated with it
-    #     '''
-    #     for node in self.black_nodes:
-    #         if node.pose == pose:
-    #             return node
-    
-    # def initialize_target_black_nodes(self, object_name_list):
-    #     '''
-    #     Creates nodes for target poses. Includes the pose information in each of these black nodes
-        
-    #     Returns:
-    #     A list of black nodes, each containing a target pose
-    #     '''
-    #     black_nodes = []
-    #     for object_name in object_name_list:
-    #         bnode = RedBlackNode(name=object_name, node_type='b')
-    #         bnode.pose = self.object_goal_pose_dict[bnode.object]
-    #         black_nodes.append(bnode)
-    #     return black_nodes
-    
-    # def initialize_initial_red_nodes(self, object_name_list):
-    #     '''
-    #     Initializes the red nodes but does not add any pose information (as it is not collected yet)
-        
-    #     Returns:
-    #     A list of red nodes (without pose information)
-    #     '''
-    #     red_nodes = []
-    #     for object_name in object_name_list:
-    #         rnode = RedBlackNode(name=object_name, node_type='r')
-    #         rnode.target_black = [self.find_target_black_node(self.object_goal_pose_dict[rnode.object])]
-    #         red_nodes.append(rnode)
-    #     return red_nodes
-
-
-    # def update_red_nodes(self, detected_object_label_list):
-    #     '''
-    #     Here, we assume that object initial and grasp poses are provided to us. We add this information to the nodes
-        
-    #     Returns:
-    #     None
-    #     '''
-    #     for node in self.red_nodes:
-    #         if node.object in detected_object_label_list:
-    #             print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
-    #             if node.done == True or node.type == 'b':
-    #                 continue
-    #             node.pickable = True
-    #             node.pose = self.object_init_pose_dict[node.object]
-    #             node.pick_grasp_pose = self.object_pick_grasp_pose_dict[node.object]
-    #             node.place_grasp_pose = self.object_place_grasp_pose_dict[node.object]
-
-    # def update_black_nodes(self, scene_point_cloud = [], occ_map = []):
-    #     '''
-    #     Currently, this function checks if a particular place is occupied or not and assigns occupancy statuses 
-    #     to the black nodes (target pose nodes). 
-        
-    #     Stacking information: TO BE ADDED IN FUTURE (USING SCENE GRAPHS OR RELATED METHODS)
-        
-    #     Parameters:
-    #     1. scene_point_cloud: PCD obtained from kinect/realsense
-        
-    #     Returns:
-    #     None
-    #     '''
-    #     # 1. Get occupancy map
-    #     if len(occ_map) == 0:
-    #         print("Occupancy map building ...")
-    #         occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(scene_point_cloud.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
-    #         print("Occupancy map build!")
-    #     else:
-    #         print("Occupancy map recieved!")
-    #     # 2. Get path to materials
-    #     rospack = rospkg.RosPack()
-    #     materials_path = rospack.get_path('ocrtoc_materials')
-    #     print("Rospack path: {}*********************++++++++++++++++++++++++++++*************************+++++++++++++++++++++++++++".format(materials_path))
-    #     # 3. Generate occupancy maps for each of the objects and compare the two maps. 
-    #     #    If both the maps have entry '1' at any particular pixel, then the place is said to be occupied
-    #     # FUTURE: ADD TOLERANCE (Concept: It is okay to have few pixels occupied, as long as it is not too many (set some threshold))
-    #     pcds = []
-    #     for bnode in self.black_nodes:
-    #         if bnode.object in self.object_goal_pose_dict:
-    #             temp = bnode.object.split('_')
-    #             model_name = ''
-    #             for i in range(len(temp)-1):
-    #                 if i==0:
-    #                     model_name = model_name + temp[i]
-    #                 else:
-    #                     model_name = model_name + '_' + temp[i]
-    #             path_to_object_mesh = os.path.join(materials_path, 'models/{}/textured.obj'.format(model_name)) # visual.ply
-    #             # Reading textured mesh and transforming it to the actual goal pose
-    #             mesh = o3d.io.read_triangle_mesh(path_to_object_mesh)
-    #             pose = self.object_goal_pose_dict[bnode.object]
-    #             translation = np.array([pose.position.x, pose.position.y, pose.position.z]) - np.array(mesh.get_center())
-    #             orientation = (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z)
-    #             mesh.rotate(mesh.get_rotation_matrix_from_quaternion(orientation)) # center = True by default (implies rotation is applied w.r.t the center of the object)
-    #             mesh.translate((translation[0], translation[1], translation[2])) 
-    #             pcd =  mesh.sample_points_poisson_disk(1000, init_factor=5, pcl=None)
-    #             occ1 = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120, dir_path='/root/occ_map_{model_name}.png')
-                
-    #             amount_required_occ1 = np.sum(occ1)
-    #             # Check if occupied
-    #             amount_occupied = np.sum(np.logical_and(occ_map, occ1))
-    #             occ_perc = 100*float(amount_occupied)/float(amount_required_occ1)
-    #             if occ_perc > 5:
-    #                 bnode.occupied = True
-    #             else:
-    #                 bnode.occupied = False
-    #             # is_occupied = np.any(np.logical_and(occ_map, occ1))
-    #             # bnode.occupied = is_occupied
-    #             print("{} percentage of {}'s target pose is occupied".format(occ_perc, bnode.object))
-    #             print("So, occupied = {}".format(bnode.occupied))
-    #             # pcds.append(pcd)
-    #     # o3d.visualization.draw_geometries(pcds)
-    #     # exit(1)
         
         
     def get_color_image_frame_id(self):
@@ -1298,15 +1271,35 @@ class TaskPlanner(object):
                 f = open('/root/plan_result.txt', 'a')
                 f.write("\nGoing for a buffer spot due to partial occupancy")
                 f.close()
-                position = self.object_goal_pose_dict[object_name].position
-                orientation = self.object_goal_pose_dict[object_name].orientation
-                target_cart_pose = np.array([position.x, position.y, position.z,
-                                             orientation.x, orientation.y, 
-                                             orientation.z, orientation.w])
+                # position = self.object_goal_pose_dict[object_name].position
+                # orientation = self.object_goal_pose_dict[object_name].orientation
+                # target_cart_pose = np.array([position.x, position.y, position.z,
+                #                              orientation.x, orientation.y, 
+                #                              orientation.z, orientation.w])
+                target_pose = self.object_goal_pose_dict[object_name]
+                position = target_pose.position
+                pos = [position.x, position.y, position.z]
+                orientation = target_pose.orientation
+                quat_or = [orientation.x, orientation.y, orientation.z, orientation.w]
+                r = Rotation.from_quat(quat_or) # Convert quaternion to rotation matrix
+                euler = r.as_euler('xyz', degrees=False)
+                target_6D_pose = [pos[0], pos[1], pos[2], euler[0], euler[1], euler[2]]
+
                 print("object_mesh_path={}".format(self.object_label_mesh_path_dict[object_name]))
                 current_pcd = self.get_point_cloud_from_kinect()
-                buffer_spot_2d = self.occ_and_buffer.marching_grid(scene_pcd=current_pcd, object_mesh_path=self.object_label_mesh_path_dict[object_name],
-                                                                   target_pose_6D= target_cart_pose, OCC_THRESH=1.0, scene_name='-', object_name='-')
+                scene_omap = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120,
+                                                    threshold=1, dir_path='./results/{}-{}.png'.format('-', object_name), save=False)
+                # buffer_spot_2d = self.occ_and_buffer.marching_grid(scene_pcd=current_pcd, object_mesh_path=self.object_label_mesh_path_dict[object_name],
+                #                                                    target_pose_6D= target_6D_pose, OCC_THRESH=1.0, scene_name='-', object_name='-')
+
+                buffer_spot_2d = self.occ_and_buffer.convolutional_buffer_sampler(scene_omap=scene_omap,
+                                                                    entity_omap = self.object_entities[object_name].kernel_map, 
+                                                                    target_6D_pose=target_6D_pose, 
+                                                                    object_mesh_path=self.object_label_mesh_path_dict[object_name],
+                                                                    debug=False)
+                if len(buffer_spot_2d) == 0:
+                    print("Invalid buffer spot!!!")
+                    buffer_spot_2d = [target_6D_pose[0], target_6D_pose[1]]
                 # buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
                 buffer_pose = copy.deepcopy(self.object_init_pose_dict[object_name])
                 buffer_pose.position.x = buffer_spot_2d[0]
@@ -1372,6 +1365,12 @@ class TaskPlanner(object):
         for i, key in enumerate(self.object_goal_pose_dict.keys()):
             position = self.object_goal_pose_dict[key].position
             p = [position.x, position.y, position.z]
+            if self.search_strings2(key, ['clear_box', 'tray']):
+                p[2] = p[2] - 0.2
+            elif self.search_strings2(key, ['plate']):
+                p[2] = p[2] - 0.1
+            elif self.search_strings2(key, ['bowl']):
+                p[2] = p[2] - 0.5
             orientation = self.object_goal_pose_dict[key].orientation
             o = [orientation.w, orientation.x, orientation.y, orientation.z]
             posep = []
@@ -1399,6 +1398,18 @@ class TaskPlanner(object):
         # 1.2 Create the global object dictionary using stack information
         self.create_global_object_dict()
              
+        # 1.3 Create occupancy kernel maps for each object
+        for obj_label in left_object_labels:
+            target_pose = self.object_goal_pose_dict[obj_label]
+            position = target_pose.position
+            pos = [position.x, position.y, position.z]
+            orientation = target_pose.orientation
+            quat_or = [orientation.x, orientation.y, orientation.z, orientation.w]
+            r = Rotation.from_quat(quat_or) # Convert quaternion to rotation matrix
+            euler = r.as_euler('xyz', degrees=False)
+            target_6D_pose = [pos[0], pos[1], pos[2], euler[0], euler[1], euler[2]]
+            self.object_entities[obj_label] = Object(self.object_label_mesh_path_dict[obj_label])
+            self.object_entities[obj_label].get_occupancy_map_kernel(target_6D_pose, self.occ_and_buffer, debug=False)
                    
         # 1. Create black nodes for target poses
         # self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
@@ -1879,8 +1890,12 @@ class TaskPlanner(object):
         joint_state = rospy.wait_for_message("/joint_states", JointState)
         gripper_dist = [joint_state.position[0], joint_state.position[1]]
         print("gripper distance is", gripper_dist)
-        if gripper_dist[0] > 0.005 and gripper_dist[1] > 0.005:
+        # 0.002003880450502038
+        # [0.0023614619858562946
+        # 0.001750
+        if gripper_dist[0] > 0.00100 and gripper_dist[1] > 0.00100:
             result = True #successully grabbed the object
+            print(gripper_dist[0] > 0.00100, gripper_dist[1] > 0.00100 )
         else:
             result = False #failed to grab the object
         return result
