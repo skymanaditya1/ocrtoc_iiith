@@ -1435,7 +1435,7 @@ class TaskPlanner(object):
         joint_state = rospy.wait_for_message("/joint_states", JointState)
         gripper_dist = [joint_state.position[0], joint_state.position[1]]
         print("gripper distance is", gripper_dist)
-        if gripper_dist[0] > 0.005 and gripper_dist[1] > 0.005:
+        if gripper_dist[0] > 0.0005 and gripper_dist[1] > 0.0005:
             result = True #successully grabbed the object
         else:
             result = False #failed to grab the object
