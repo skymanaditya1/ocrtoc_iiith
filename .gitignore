@@ -6,3 +6,10 @@
 # SAPIEN cache file
 *.convex.stl
 
+# temporary files
+contact_graspnet/grasps_temp_*.npy
+contact_graspnet/results/predictions_temp_*.npz
+contact_graspnet/temp_*.npy
+contact_graspnet/temp_colors_*.npy
+ocrtoc_perception/src/ocrtoc_perception/pose/rendered_object_images/*/*.pickle
+ocrtoc_perception/src/ocrtoc_perception/pose/rendered_object_images/*
