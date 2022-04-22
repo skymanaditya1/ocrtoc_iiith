@@ -48,6 +48,9 @@ from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
+# Scene classification
+from scene_classification import scene_process
+
 
 # Miscellineous functions class - contains functions from https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py 
 # As open3d_plus import failed (due to unknown reasons - TO BE FIXED)
@@ -984,6 +987,9 @@ class TaskPlanner(object):
                 continue
             temp.append(object)
         left_object_labels = copy.deepcopy(temp)
+
+        # Scene recognition
+        scene_identified = False
              
                    
         # 1. Create black nodes for target poses
@@ -1032,12 +1038,14 @@ class TaskPlanner(object):
             
             self.detected_object_label_list = detected_object_list
             
-            
             n_detected_objects = len(self.detected_object_label_list )
             print(self.detected_object_label_list)
             # nodes = []
             
-            
+            if not scene_identified:
+                process_scene = scene_process(self.object_init_pose_dict, self.object_goal_pose_dict)
+                print('Given scene should be ' + '' if process_scene else 'not' + ' processed...' )
+                scene_identified = True
             
             for lab_index, label in enumerate(self.detected_object_label_list ):
                 
