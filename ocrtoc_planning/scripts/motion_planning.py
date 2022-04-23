@@ -173,8 +173,9 @@ class MotionPlanner(object):
     
     # move to specified home pose
     def to_rest_pose(self):
-
+        
         rest_pose = Pose()
+        
         rest_pose.position.x = -0.112957249941
         rest_pose.position.y = 2.9801544038e-05
         rest_pose.position.z = 0.590340135745
@@ -186,8 +187,8 @@ class MotionPlanner(object):
         fraction = 0
         attempts = 0
         waypoints = []
-        # group_goal = self.ee_goal_to_link8_goal(rest_pose)
-        # print("group goal after tf", group_goal)
+        group_goal = self.ee_goal_to_link8_goal(rest_pose)
+        print("group goal after tf", group_goal)
         group_goal = rest_pose
         
         waypoints.append(copy.deepcopy(group_goal))
@@ -427,7 +428,7 @@ class MotionPlanner(object):
                 self.to_rest_pose()
             
             if i==1 and last_gripper_action=='pick':
-                # self.to_rest_pose()
+                
                 print("At rest pose")
                 success = self.gripper_width_test()
                 if success == False:
@@ -695,7 +696,13 @@ class MotionPlanner(object):
     def get_points_to_target_upright(self, target_pose):
         points_to_target = []
         current_pose = self._move_group.get_current_pose(self._end_effector).pose
+        
         exit_pose = copy.deepcopy(current_pose)
+        
+        quaternion = [exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w]
+        (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
+        quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
+        exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w = quaternion
         exit_pose.position.z += self._up1
         points_to_target.append(copy.deepcopy(exit_pose))
 
@@ -814,21 +821,4 @@ if __name__ == '__main__':
     planner = MotionPlanner()
     end_effector_link = planner._move_group.get_end_effector_link()
     print('manipulator end-effector link name: {}'.format(end_effector_link))
-    # pose_goal = []
-    # pose_target = Pose()
-    # pose_target.position.x = 0.1
-    # pose_target.position.y = 0.5
-    # pose_target.position.z = 0.3
-    # pose_target.orientation.x = 1
-    # pose_target.orientation.y = 0
-    # pose_target.orientation.z = 0
-    # pose_target.orientation.w = 0
-    # pose_goal.append(copy.deepcopy(pose_target))
-
-    # # pose_target.position.y += 0.15
-    # # pose_goal.append(copy.deepcopy(pose_target))
-
-    # # pose_target.position.x += 0.15
-    # # pose_goal.append(copy.deepcopy(pose_target))
-
-    # planner.move_cartesian_space(pose_goal)
+  

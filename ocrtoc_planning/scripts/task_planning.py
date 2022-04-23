@@ -49,188 +49,6 @@ from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
 
 
-# Miscellineous functions class - contains functions from https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py 
-# As open3d_plus import failed (due to unknown reasons - TO BE FIXED)
-class MiscFunctions:
-    '''
-    Open3d_plus library functions taken from - https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py
-    Due to open3d_plus import failure
-    '''
-    def __init__(self):
-        pass
-    
-    def array2pcd(self, points, colors):
-        """
-        Convert points and colors into open3d point cloud.
-        Args:
-            points(np.array): coordinates of the points.
-            colors(np.array): RGB values of the points.
-        Returns:
-            open3d.geometry.PointCloud: the point cloud.
-        """
-        pcd = o3d.geometry.PointCloud()
-        pcd.points = o3d.utility.Vector3dVector(points)
-        pcd.colors = o3d.utility.Vector3dVector(colors)
-        return pcd
-
-    def pcd2array(self, pcd):
-        """
-        Convert open3d point cloud into points and colors.
-        Args:
-            pcd(open3d.geometry.PointCloud): the point cloud.
-        Returns:
-            np.array, np.array: coordinates of the points, RGB values of the points.
-        """
-        points = np.asarray(pcd.points)
-        colors = np.asarray(pcd.colors)
-        return points, colors
-    
-class OccupancyAndBuffer:
-    def __init__(self):
-        pass
-    
-    def generate_2D_occupancy_map(self, world_dat, x_min=None, y_min=None, x_range=None, y_range=None, threshold=3, dir_path='/root/occ_map.png'):
-        '''
-        A non-traditional way to mark occupied areas on a grid. In this method, we simply look for 
-        areas with z>threshold (threshold~0) and mark them as occupied. This is expected to be highly
-        effective for OCRTOC
-        '''
-        if x_range == None:
-            x_range = int(np.round(np.max(world_dat[:, 0]))-np.round(np.min(world_dat[:, 0])))
-            print("x_range: {}".format(x_range))
-        if y_range == None:
-            y_range = int(np.round(np.max(world_dat[:, 1]))-np.round(np.min(world_dat[:, 1])))
-            print("y_range: {}".format(y_range))
-        # Since, pixels have integral coordinates, let us round off all the values in world_dat and remove y coordinates
-        world_dat_rounded = (np.round(world_dat)).astype(int)
-        # world_dat_rounded = (np.delete(world_dat_rounded, 2, 1)).astype(int) # Remove y coordinates column
-        if x_min == None:
-            x_min = (np.round(np.min(world_dat[:, 0]))).astype(int)
-            print("x_min: {}".format(x_min))
-        if y_min == None:
-            y_min = (np.round(np.min(world_dat[:, 1]))).astype(int)
-            print("y_min: {}".format(y_min))
-
-        pixel_counts = np.zeros(shape=(x_range+1, y_range+1), dtype=float)
-        count = 0
-        for point in world_dat_rounded:
-            #print(point-np.array([x_min, z_min], dtype=int))
-            x_coord = point[0]-x_min
-            y_coord = point[1] - y_min
-            if x_coord > x_range or y_coord > y_range or x_coord < 0 or y_coord < 0:
-                continue
-            if point[2] > 0:
-                pixel_counts[point[0]-x_min, point[1]-y_min]+=1
-
-        mean_points = 1# np.mean(pixel_counts)
-        occ_map = np.zeros(shape=pixel_counts.shape, dtype=np.uint8)
-        for i in range(x_range):
-            for j in range(y_range):
-                if pixel_counts[i, j] >= threshold:
-                    occ_map[i, j] = 1 # Occupied
-
-        import cv2
-        cv2.imwrite(dir_path,(occ_map * 255).astype(np.uint8))
-        # cv2.imshow('Occupancy map', (occ_map * 255).astype(np.uint8))
-        # cv2.waitKey(0)
-
-        print(pixel_counts)
-
-        return occ_map
-    
-    def visualize_pcd_with_global_coordinate_frame(self, pcd):
-        mesh_frame1 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[0, 0, 0])
-        mesh_frame2 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[-0.3, -.6, 0])
-        mesh_frame3 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[.3, -.6, 0])
-        mesh_frame4 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[.3, .6, 0])
-        mesh_frame5 = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[-.3, .6, 0])
-        o3d.visualization.draw_geometries([pcd, mesh_frame1, mesh_frame2, mesh_frame3, mesh_frame4, mesh_frame5])
-        
-    def get_closest_to(self, empty_spots, target_pos = np.array([.0, .0]), collision_diameter=0.1):
-        distances = np.linalg.norm(empty_spots - target_pos, axis=1) 
-        valid_empties = []
-        valid_distances = []
-        for i in range(len(empty_spots)):
-            if distances[i] > collision_diameter:
-                valid_empties.append(empty_spots[i])
-                valid_distances.append(distances[i])
-        print("Valid distances: {}".format(valid_distances))
-        closest_ind = np.argmin(np.array(valid_distances))
-        print("Closest_ind: {}".format(closest_ind))
-        print("Closest vector: {}".format(valid_empties[closest_ind]))
-        # print(distances)
-        # print("Valid empties: {}".format(valid_empties))
-        return valid_empties[closest_ind]
-    
-    
-    def get_empty_spot(self, pcd = [], occ_map = [], closest_target = np.array([])):
-        '''
-        First get occupancy grid for the given point cloud. Now, use the coordinates of unoccupied cells
-        as buffers (scale them down and transform them approximately).
-        '''
-        # self.visualize_pcd_with_global_coordinate_frame(pcd)
-        if len(occ_map) == 0:
-            occ_map = self.generate_2D_occupancy_map(np.asarray(pcd.points)*100, threshold=1, dir_path='./results/occ_map=2-2-2.png')
-        print("occ_map shape: {}".format(occ_map.shape))
-        # convert_to_occupancy_map(np.asarray(pcd.points)*100, threshold=500, dir_path='./results/occ_map_thr=1.png')
-        # x_limits = [-.3, .3]
-        # y_limits = [-.6, .6]
-
-        # Generating empty spots (random sampling)
-        x_lims, y_lims = occ_map.shape
-        zero_coords = np.where(occ_map == 0)
-        print(zero_coords, type(zero_coords))
-        empty_spots = np.zeros(shape=(len(zero_coords[0]), 2), dtype=float)
-        empty_spots[:, 0] = zero_coords[0]
-        empty_spots[:, 1] = zero_coords[1]
-        empty_spots = (empty_spots/100) - np.array([0.3, 0.6], dtype=float)
-        print(empty_spots, type(empty_spots), empty_spots.shape)
-
-        closest_empty_spot = None
-        if len(closest_target) == 0:
-            closest_empty_spot = self.get_closest_to(empty_spots)
-        else:
-            closest_empty_spot = self.get_closest_to(empty_spots, target_pos=closest_target)
-        return closest_empty_spot
-        # mesh_frame = o3d.geometry.TriangleMesh.create_coordinate_frame(size=0.2, origin=[closest_empty_spot[0], closest_empty_spot[1], 0])
-        # o3d.visualization.draw_geometries([pcd, mesh_frame])
-
-# Red Black Graph (Data structure)
-class RedBlackNode:
-    def __init__(self, name, node_type):
-        '''
-        Parameters
-        name: Name of the object that it is related to
-        node_type: 'r' or 'b' (red implies initial/virtual object poses, black implies target or completed initial poses)
-        
-        Attributes:
-        self.name: str: Unique identifier for each node (name+type)
-        self.object: str: Name of the object associated with the node
-        self.type: str: Type of node (red or black)
-        self.target_black: list: Target black node for this node if this node is red
-        self.done: boolean: If true, this node is done (task associated with it (pick-place) is done)
-        self.occupied: boolean: If true, this node is partially occupied, otherwise, it is free
-        self.prev_node_in_stack: Reference to the black node that is under the current pose in stack if the current node is black
-        self.next_node_in_stack: Reference to the black node that is above the current pose in stack if the current node is black
-        '''
-        self.name = "{}_{}".format(name, node_type)
-        self.object = name
-        self.type = node_type
-        # self.attached_red_nodes = []
-        self.target_black = []
-        self.done = False
-        self.occupied = False
-        self.prev_node_in_stack = None
-        self.next_node_in_stack = None
-        self.pose = None
-        self.pick_grasp_pose = None
-        self.place_grasp_pose = None
-        
-        self.pickable = False # Will be set to true if we get valid pick grasp and pose of the object (only for red node)
-        
-    def set_done(self):
-        self.done = True
-        self.type = 'b'
         
 
 
@@ -262,7 +80,7 @@ class TaskPlanner(object):
             # if the plane distance between two objects smaller than distance threshold,
             # the two objects are considered to be stacked
             self._distance_threshold = config_parameters["distance_threshold"]
-        self._task_planner_sub = rospy.Subscriber('/start_task_planner', Int64, self.task_planner_callback, queue_size=1)
+        
         self._service_get_sim_pose = rospy.ServiceProxy('/get_model_state', GetModelState)
         self._service_get_target_pose = rospy.ServiceProxy('/perception_action_target', PerceptionTarget)
         self._service_get_fake_pose = rospy.ServiceProxy('/fake_perception_action_target', PerceptionTarget)
@@ -270,61 +88,10 @@ class TaskPlanner(object):
         self._transformer = TransformInterface()
         self._motion_planner = MotionPlanner()
         
-        # Setting up camera interfaces
-        self.arm_topic= 'arm_controller/command'
-        self.color_info_topic_name= '/realsense/color/camera_info'
-        self.color_topic_name= '/realsense/color/image_raw'
-        self.depth_topic_name= '/realsense/aligned_depth_to_color/image_raw'
-        self.points_topic_name= '/realsense/depth/points'
-        self.kinect_color_topic_name= '/kinect/color/image_rect_color'
-        self.kinect_depth_topic_name= '/kinect/depth_to_color/image_raw'
-        self.kinect_points_topic_name= '/kinect/depth/points'
-        self.transform_from_frame= 'world'
         
-        # self.arm_controller = ArmController(topic = self.config['arm_topic'])
-        self.camera_interface = CameraInterface()
-        self.transform_interface = TransformInterface()
-        # Subscribing to realsense and setting it up (camera attached to arm's end effector link)
-        self.camera_interface.subscribe_topic(self.color_info_topic_name, CameraInfo)
-        self.camera_interface.subscribe_topic(self.color_topic_name, Image)
-        self.camera_interface.subscribe_topic(self.points_topic_name, PointCloud2)
-        time.sleep(2)
-        self.color_transform_to_frame = self.get_color_image_frame_id()
-        self.points_transform_to_frame = self.get_points_frame_id()
-        
-        # Subscribing to kinect and setting it up (external camera)
-        self.camera_interface.subscribe_topic(self.kinect_color_topic_name, Image)
-        self.camera_interface.subscribe_topic(self.kinect_points_topic_name, PointCloud2)
-        time.sleep(2)
-        self.kinect_color_transform_to_frame = self.get_kinect_color_image_frame_id()
-        self.kinect_points_transform_to_frame = self.get_kinect_points_frame_id()
-        
-        # Reconstruction config
-        self.reconstruction_config = {
-            'x_min': -0.20,
-            'y_min': -0.6,
-            'z_min': 0.0, # z_min: -0.05
-            'x_max': 0.3,
-            'y_max': 0.6,
-            'z_max': 0.4,
-            'nb_neighbors': 50,
-            'std_ratio': 2.0,
-            'voxel_size': 0.0015,
-            'icp_max_try': 5,
-            'icp_max_iter': 2000,
-            'translation_thresh': 3.95,
-            'rotation_thresh': 0.02,
-            'max_correspondence_distance': 0.02
-        }
         
         self.clear_box_flag = False
         
-        # MiscFunctions class instance named o3dp (as it is same as o3dp (since the import failed, we are directly using the source code 
-        #   from the repo))
-        self.o3dp = MiscFunctions()
-        
-        # Occupancy map and buffer spot sampler class
-        self.occ_and_buffer = OccupancyAndBuffer()
         
         
         self.block_labels = blocks
@@ -344,17 +111,7 @@ class TaskPlanner(object):
         print("#"*40)
         print("task planner constructed")
 
-    # def get_goal_pose_list_from_input(self, goal_cartesian_poses):
-    #     '''
-    #     The task information is very crude. This function helps us extract the goal poses from task information 
-    #     and returns a list of goal poses
-    #     '''
-    #     goal_poses = []
-    #     for goal in goal_cartesian_poses:
-    #         pose = goal.poses[0]
-    #         goal_poses.append(pose)
-    #     return goal_poses
-    
+       
     def get_goal_pose_dict(self, block_labels, goal_poses):
         '''
         Given a list of goal poses and block labels, this function returns a dictionary with labels as keys
@@ -365,7 +122,13 @@ class TaskPlanner(object):
         '''
         goal_pose_dict = {}
         # print(zip(block_labels, goal_poses))
+        
+               
         for label, poses in zip(block_labels, goal_poses):
+            
+            if self.search_strings2(object, ['clear_box']): #, 'book', 'round_plate', 'plate_holder']):
+                continue
+                       
             print("Poses: {}".format(poses))
             print("Poses type: {}".format(type(poses)))
             for i, pose in enumerate(poses.poses):
@@ -537,214 +300,9 @@ class TaskPlanner(object):
         return any([x in object_name for x in searchable_list])
     
     def search_strings(self, string_list, searchable):
-        '''
-        Searches for a substring in a given list of strings
-        
-        Input: 
-        string_list: str (list of strings to be searched in)
-        searchable: str (substring to search for)
-        
-        Return:
-        Bool: True/False
-        '''
         return any([searchable in x for x in string_list])
     
-    def find_target_black_node(self, pose):
-        '''
-        Given a pose, find the black node that is associated with it
-        '''
-        for node in self.black_nodes:
-            if node.pose == pose:
-                return node
     
-    def initialize_target_black_nodes(self, object_name_list):
-        '''
-        Creates nodes for target poses. Includes the pose information in each of these black nodes
-        
-        Returns:
-        A list of black nodes, each containing a target pose
-        '''
-        black_nodes = []
-        for object_name in object_name_list:
-            bnode = RedBlackNode(name=object_name, node_type='b')
-            bnode.pose = self.object_goal_pose_dict[bnode.object]
-            black_nodes.append(bnode)
-        return black_nodes
-    
-    def initialize_initial_red_nodes(self, object_name_list):
-        '''
-        Initializes the red nodes but does not add any pose information (as it is not collected yet)
-        
-        Returns:
-        A list of red nodes (without pose information)
-        '''
-        red_nodes = []
-        for object_name in object_name_list:
-            rnode = RedBlackNode(name=object_name, node_type='r')
-            rnode.target_black = [self.find_target_black_node(self.object_goal_pose_dict[rnode.object])]
-            red_nodes.append(rnode)
-        return red_nodes
-
-
-    def update_red_nodes(self, detected_object_label_list):
-        '''
-        Here, we assume that object initial and grasp poses are provided to us. We add this information to the nodes
-        
-        Returns:
-        None
-        '''
-        for node in self.red_nodes:
-            if node.object in detected_object_label_list:
-                print("{} is in the object list*********************+++++++++++++*****************".format(node.object))
-                if node.done == True or node.type == 'b':
-                    continue
-                node.pickable = True
-                node.pose = self.object_init_pose_dict[node.object]
-                node.pick_grasp_pose = self.object_pick_grasp_pose_dict[node.object]
-                node.place_grasp_pose = self.object_place_grasp_pose_dict[node.object]
-
-    def update_black_nodes(self, scene_point_cloud = [], occ_map = []):
-        '''
-        Currently, this function checks if a particular place is occupied or not and assigns occupancy statuses 
-        to the black nodes (target pose nodes). 
-        
-        Stacking information: TO BE ADDED IN FUTURE (USING SCENE GRAPHS OR RELATED METHODS)
-        
-        Parameters:
-        1. scene_point_cloud: PCD obtained from kinect/realsense
-        
-        Returns:
-        None
-        '''
-        # 1. Get occupancy map
-        if len(occ_map) == 0:
-            print("Occupancy map building ...")
-            occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(scene_point_cloud.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
-            print("Occupancy map build!")
-        else:
-            print("Occupancy map recieved!")
-        # 2. Get path to materials
-        rospack = rospkg.RosPack()
-        materials_path = rospack.get_path('ocrtoc_materials')
-        print("Rospack path: {}*********************++++++++++++++++++++++++++++*************************+++++++++++++++++++++++++++".format(materials_path))
-        # 3. Generate occupancy maps for each of the objects and compare the two maps. 
-        #    If both the maps have entry '1' at any particular pixel, then the place is said to be occupied
-        # FUTURE: ADD TOLERANCE (Concept: It is okay to have few pixels occupied, as long as it is not too many (set some threshold))
-        pcds = []
-        for bnode in self.black_nodes:
-            if bnode.object in self.object_goal_pose_dict:
-                temp = bnode.object.split('_')
-                model_name = ''
-                for i in range(len(temp)-1):
-                    if i==0:
-                        model_name = model_name + temp[i]
-                    else:
-                        model_name = model_name + '_' + temp[i]
-                path_to_object_mesh = os.path.join(materials_path, 'models/{}/textured.obj'.format(model_name)) # visual.ply
-                # Reading textured mesh and transforming it to the actual goal pose
-                mesh = o3d.io.read_triangle_mesh(path_to_object_mesh)
-                pose = self.object_goal_pose_dict[bnode.object]
-                translation = np.array([pose.position.x, pose.position.y, pose.position.z]) - np.array(mesh.get_center())
-                orientation = (pose.orientation.w, pose.orientation.x, pose.orientation.y, pose.orientation.z)
-                mesh.rotate(mesh.get_rotation_matrix_from_quaternion(orientation)) # center = True by default (implies rotation is applied w.r.t the center of the object)
-                mesh.translate((translation[0], translation[1], translation[2])) 
-                pcd =  mesh.sample_points_poisson_disk(1000, init_factor=5, pcl=None)
-                occ1 = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120, dir_path='/root/occ_map_{model_name}.png')
-                
-                amount_required_occ1 = np.sum(occ1)
-                # Check if occupied
-                amount_occupied = np.sum(np.logical_and(occ_map, occ1))
-                occ_perc = 100*float(amount_occupied)/float(amount_required_occ1)
-                if occ_perc > 5:
-                    bnode.occupied = True
-                else:
-                    bnode.occupied = False
-                # is_occupied = np.any(np.logical_and(occ_map, occ1))
-                # bnode.occupied = is_occupied
-                print("{} percentage of {}'s target pose is occupied".format(occ_perc, bnode.object))
-                print("So, occupied = {}".format(bnode.occupied))
-                # pcds.append(pcd)
-        # o3d.visualization.draw_geometries(pcds)
-        # exit(1)
-        
-        
-    def get_color_image_frame_id(self):
-        '''Realsense topic'''
-        return self.camera_interface.get_ros_image(self.color_topic_name).header.frame_id
-    
-    def get_points_frame_id(self):
-        '''Realsense topic'''
-        return self.camera_interface.get_ros_points(self.points_topic_name).header.frame_id
-    
-    def get_kinect_color_image_frame_id(self):
-        '''Kinect camera'''
-        return self.camera_interface.get_ros_image(self.kinect_color_topic_name).header.frame_id
-
-    def get_kinect_depth_image_frame_id(self):
-        '''Kinect camera'''
-        return self.camera_interface.get_ros_image(self.kinect_depth_topic_name).header.frame_id
-
-    def get_kinect_points_frame_id(self):
-        '''Kinect camera'''
-        return self.camera_interface.get_ros_points(self.kinect_points_topic_name).header.frame_id
-    
-    def get_kinect_points_transform_matrix(self):
-        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.kinect_points_transform_to_frame)
-    
-    def get_kinect_color_transform_matrix(self):
-        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.kinect_color_transform_to_frame)
-    
-    def kinect_get_pcd(self, use_graspnet_camera_frame = False):
-        return self.camera_interface.get_o3d_pcd(self.kinect_points_topic_name)
-    
-    def kinect_process_pcd(self, pcd, reconstruction_config):
-        points, colors = self.o3dp.pcd2array(pcd)
-        mask = points[:, 2] > reconstruction_config['z_min']
-        mask = mask & (points[:, 2] < reconstruction_config['z_max'])
-        mask = mask & (points[:, 0] > reconstruction_config['x_min'])
-        mask = mask & (points[:, 0] < reconstruction_config['x_max'])
-        mask = mask & (points[:, 1] < reconstruction_config['y_max'])
-        mask = mask & (points[:, 1] > reconstruction_config['y_min'])
-        pcd = self.o3dp.array2pcd(points[mask], colors[mask])
-        return pcd.voxel_down_sample(reconstruction_config['voxel_size'])
-    
-    def capture_pcd(self, use_camera='kinect'):
-        t1 = time.time()
-        pcds = []
-        color_images = []
-        camera_poses = []
-        # capture images by realsense. The camera will be moved to different locations.
-        if use_camera == 'kinect': # in ['kinect', 'both']:
-            points_trans_matrix = self.get_kinect_points_transform_matrix()
-            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
-            full_pcd_kinect.transform(points_trans_matrix)
-            full_pcd_kinect = self.kinect_process_pcd(full_pcd_kinect, self.reconstruction_config)
-                # pcds.append(full_pcd_kinect)
-                # kinect_image = self.get_kinect_image()
-                # kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGBA2RGB)
-                # kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR)
-                # if self.debug_kinect:
-                #     cv2.imshow('color', cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR))
-                #     cv2.waitKey(0)
-                #     cv2.destroyAllWindows()
-                # color_images.append(kinect_image)
-
-                # if self.debug:
-                #     print('points_trans_matrix:', points_trans_matrix)
-                # camera_poses.append(self.get_kinect_color_transform_matrix())
-            return full_pcd_kinect
-        elif use_camera == 'realsense':
-            print("Try with Kinect please, Realsense is not ready yet;( ******++++++++++++***********")
-        
-    def get_point_cloud_from_kinect(self):
-        '''
-        Capture and get point cloud from Kinect camera (Will be used to build occupancy map)
-        '''
-        pcd_kinect = self.capture_pcd(use_camera='kinect')
-        # import open3d as o3d
-        # o3d.visualization.draw_geometries([pcd_kinect])
-        return pcd_kinect
-        
     def create_data_model(self, nodes):
         """Stores the data for the problem."""
         data = {}
@@ -788,6 +346,28 @@ class TaskPlanner(object):
                 
         data['vehicle_capacities'] = [1] # Commented for python2.7
         return data
+
+    def get_goal_pose_dict(self, block_labels, goal_poses):
+        '''
+        Given a list of goal poses and block labels, this function returns a dictionary with labels as keys
+        
+        Parameters:
+        block_labels: List of labels (strings)
+        goal_poses: List of lists of block poses 
+        '''
+        goal_pose_dict = {}
+                              
+        for label, poses in zip(block_labels, goal_poses):
+            
+            if self.search_strings2(label, ['clear_box']): #, 'book', 'round_plate', 'plate_holder']):
+                continue
+                       
+            print("Poses: {}".format(poses))
+            print("Poses type: {}".format(type(poses)))
+            for i, pose in enumerate(poses.poses):
+                goal_pose_dict["{}_v{}".format(label, i)] = pose
+            # goal_pose_dict[label] = pose
+        return goal_pose_dict   
 
     def print_solution(self, data, manager, routing, solution):
         """Prints solution on console."""
@@ -945,12 +525,13 @@ class TaskPlanner(object):
                 print("Going to pick {}\t|\t".format(object_name))
                 self._motion_planner.fake_place()
                 success = self.go_pick_object(object_name=object_name)
-                                                     
+                 # 3. Check if the object is grapsed
+                # success = self.gripper_width_test()
+                                     
                 if success == False:
                     print("Pick failed")
                 else:
                     print("Pick success")
-            
             elif self.search_strings([name], searchable='place') and success==True:
                 print("Going to place {}\t|\t".format(object_name))
                 success = self.go_place_object(object_name)
@@ -973,25 +554,14 @@ class TaskPlanner(object):
         5. Go back to step 1 if all objects are not picked and placed yet
         """
 
-
-        self._motion_planner.test()
-
-
         print("Cycle plan function started executing!")
         left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
-        # Remove clear_box from the list of movable objects
-        # temp = []
-        # for object in left_object_labels:
-        #     if 'clear_box' in object:
-        #         continue
-        #     temp.append(object)
-        # left_object_labels = copy.deepcopy(temp)
-                   
+        
+                  
         
         count = 0
-        label_count = 1
-        while len(left_object_labels) > 0 and count <= 3:
+        while len(left_object_labels) > 0 and count <= 5:
             count += 1
             # 3. Get information about left objects from perception node
             
@@ -1033,9 +603,7 @@ class TaskPlanner(object):
             
             n_detected_objects = len(self.detected_object_label_list )
             print(self.detected_object_label_list)
-            # nodes = []
-            
-            
+                       
             
             for lab_index, label in enumerate(self.detected_object_label_list ):
                 
@@ -1098,118 +666,7 @@ class TaskPlanner(object):
             self._motion_planner.to_rest_pose()
             
             
-    def find_red_node(self, node_list):
-        for node in node_list:
-            if node.pose !=None and node.type == 'r' and node.target_black[0].type=='b' and node.target_black[0].occupied == False and node.pickable==True:
-                if node.target_black[0].prev_node_in_stack == None:
-                    # print("yes {}".format(node.name))
-                    return node
-                else:
-                    if node.target_black[0].prev_node_in_stack.done == True:
-                        return node
-        return None
-
-    def just_find_red(self, node_list):
-        for node in node_list:
-            if node.type == 'r' and len(node.target_black) > 0 and node.pose != None and node.pickable == True:
-                return node
-        return None
-
-    def solve(self, occ_map = []):
-        '''Solver
-        Somewhat DFS
-        '''
-        # dfs 
-        completed_objects = []
-        if len(occ_map) == 0:
-            print("No occupancy map recieved, no buffer spots will be generated")
-        sequence = []
-        done = False
-        nodes = self.red_nodes
-        # head = self.find_red_node(nodes)
-        counter = 3
-        while (not done) and counter > 0:
-            current_pcd = self.get_point_cloud_from_kinect()
-            print("Total number of points in pcd: {}".format(len(current_pcd.points)))
-            occ_map = self.occ_and_buffer.generate_2D_occupancy_map(np.asarray(current_pcd.points)*100, x_min=-30, y_min=-60, x_range=60, y_range=120)
-            self.update_black_nodes(current_pcd, occ_map)
-            
-            head = self.find_red_node(nodes)
-            
-            if head == None:
-                if len(occ_map) == 0:
-                    done = True
-                    continue
-                head = self.just_find_red(nodes)
-                if head == None:
-                    done = True
-                    continue
-                buffer = RedBlackNode(name='{}_buffer'.format(head.name), node_type='r')
-                buffer.occupied = copy.deepcopy(head.occupied)
-                buffer.target_black = [head.target_black[0]]
-                buffer.done = False
-                # buffer.attached_red_nodes= head.attached_red_nodes
-                head.done = True
-                head.type = 'b'
-                print(occ_map)
-                target_cart_pose = np.array([head.target_black[0].pose.position.x, head.target_black[0].pose.position.y])
-                buffer_spot_2d = self.occ_and_buffer.get_empty_spot(occ_map=occ_map, closest_target=target_cart_pose)
-                buffer_pose = copy.deepcopy(self.object_init_pose_dict[head.object])
-                buffer_pose.position.x = buffer_spot_2d[0]
-                buffer_pose.position.y = buffer_spot_2d[1]
-                buffer.pickable = False
-                
-                # Pick and place in buffer
-                print("Generated buffer. Now, pick and place the object in buffer spot!")
-                res = self.go_pick_object(object_name=head.object)
-                # if res == True:
-                self.go_place_object(object_name=head.object, final_place_pose=buffer_pose)
-                print("Placed in buffer!")
-                # import time
-                # time.sleep(1)
-                # rospy.sleep(1)
-                
-                sequence.append(head.name)
-                sequence.append(buffer.name)
-                buffer.prev_node_in_stack = head.prev_node_in_stack
-                buffer.next_node_in_stack = head.next_node_in_stack
-                if head.next_node_in_stack != None:
-                    head.next_node_in_stack.prev_node_in_stack = buffer
-                if head.prev_node_in_stack != None:
-                    head.prev_node_in_stack.next_node_in_stack = buffer
-
-                # head = self.find_red_node(nodes)
-                nodes.append(buffer)
-                # self.red_nodes.append(buffer)
-                # nodes_labelled.append((buffer, 0))
-                print("*************************++++++++**************************\nSequence: {}".format(sequence))
-                # counter -= 1
-                continue
-            # print("Node: {}".format(head.name))
-            # Find an undone red
-            print("Picking and placing in target pose (since target pose is empty!)")
-            self.go_pick_object(object_name=head.object)
-            self.go_place_object(object_name=head.object)
-            print("Placed in target pose!")
-            sequence.append(head.name)
-            sequence.append(head.target_black[0].name)
-            head.type = 'b'
-            head.done = True
-            head.target_black[0].done = True
-            
-            completed_objects.append(head.object)
-            # head = self.find_red_node(nodes)
-            # if head == None:
-            #     done = True
-            print("Sequence: {}".format(sequence))
-            # counter -= 1
-            
-        print('Sequence: {}'.format(sequence))  
-        print("Completed objects: {}".format(completed_objects))
-        print(" red nodes: {}".format(self.red_nodes))
-        print("Nodes: {}".format(nodes))
-        return completed_objects
-
+    
     def go_pick_object(self, object_name):
         '''
         This function assumes that the arm is in it's rest pose. It first moves to pre-pick waypoint directly above the pick 
@@ -1243,9 +700,7 @@ class TaskPlanner(object):
         
         return True
         
-        
-        
-        
+
     def go_place_object(self, object_name, final_place_pose = None):
         '''
         This function assumes that the arm is in it's pick pose. It first moves to pre-place waypoint directly above the place 
@@ -1269,9 +724,7 @@ class TaskPlanner(object):
         print(" grasp pose is")
         print(grasp_pose)
                 
-        # grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
-        
-        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.1)
+        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
         
         
         orientation_q = grasp_pose.orientation
@@ -1293,192 +746,10 @@ class TaskPlanner(object):
         
         return is_placed
 
-    def draw_state(self, viewer, state, colors):
-        print("enter draw state function")
-        viewer.clear()
-        viewer.draw_environment()
-        viewer.draw_robot(*state.conf[::-1])
-        for block, pose in state.block_poses.items():
-            r, c = pose[::-1]
-            viewer.draw_block(r, c, name=block, color=colors[block])
-        if state.holding is not None:
-            pose = state.conf - GRASP
-            r, c = pose[::-1]
-            viewer.draw_block(r, c, name=state.holding, color=colors[state.holding])
-
-    # mapping move action in 2d space to cartesian space
-    def mapping_move(self, str_pose):
-        cartesian_waypoints = []
-        if str_pose in self._pose_mapping.keys():
-            if self._last_gripper_action == 'pick':
-                grasp_pose = self._pose_mapping[str_pose][self._available_grasp_pose_index[self._target_pick_object]]
-                # plan_result = self._motion_planner.move_cartesian_space(grasp_pose)  # move in cartesian straight path
-                # plan_result = self._motion_planner.move_cartesian_space_discrete(grasp_pose)  # move in cartesian discrete path
-                
-                print("in place")
-                print('$'*80) 
-                print(" grasp pose is")
-                print(grasp_pose)
-                
-                grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
-                
-                plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action=self._last_gripper_action)  # move in cartesian discrete upright path
-                if plan_result:
-                    print('Move to the target position of object {} successfully, going to place it'.format(self._target_pick_object))
-                else:
-                    print('Fail to move to the target position of object: {}'.format(self._target_pick_object))
-                    #user_input('To target place failed, Continue? Press Enter to continue or ctrl+c to stop')
-                rospy.sleep(1.0)
-            elif self._last_gripper_action == 'place':
-                for index in range(self._start_grasp_index if self._start_grasp_index >= 0 else 0, self._end_grasp_index if self._end_grasp_index <= len(self._pose_mapping[str_pose]) else len(self._pose_mapping[str_pose])):
-                    # plan_result = self._motion_planner.move_cartesian_space(self._pose_mapping[str_pose][index], self._pick_via_up)
-                    # plan_result = self._motion_planner.move_cartesian_space_discrete(self._pose_mapping[str_pose][index], self._pick_via_up)
-                    
-                    pick_grasp_pose = self._pose_mapping[str_pose][index]
-                    print("pick grasp pose")
-                    
-                    orientation_q = pick_grasp_pose.orientation
-                    orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
-                    (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
-                    print((roll, pitch, yaw))  
-                    
-                    if abs(yaw) > abs(np.deg2rad(135)) and abs(yaw) < abs(np.deg2rad(225)):
-                        yaw = yaw + np.pi
-                    orientation_q = quaternion_from_euler(roll, pitch, yaw)
-                    
-                    pick_grasp_pose.orientation = Quaternion(*orientation_q)
-                    self._pose_mapping[str_pose][index] = pick_grasp_pose
-                                                                                        
-                    plan_result = self._motion_planner.move_cartesian_space_upright(self._pose_mapping[str_pose][index], self._pick_via_up, last_gripper_action=self._last_gripper_action)
-                    if plan_result:
-                        self._available_grasp_pose_index[self._target_pick_object] = index
-                        rospy.loginfo('available grasp pose index: ' + str(index))
-                        print('target pick object: {}'.format(self._target_pick_object))
-                        if index == 0:
-                            rospy.loginfo('Planning trajectory to intelligence grasp pose successfully')
-                        elif index == 1:
-                            rospy.loginfo('Fail to plan trajectory to intelligence grasp pose, but planning trajectory to artifical intelligence grasp pose successfully')
-                        elif index == 2:
-                            rospy.loginfo('Fail to plan trajectory to artificial intelligence grasp pose, but planning trajectory to artifical grasp pose successfully')
-                        else:
-                            pass
-                        break
-                    else:
-                        #user_input('To pick action failed, Continue? Press Enter to continue or ctrl+c to stop')
-                        continue
-                else:
-                    rospy.loginfo('All grasp pose tried, but fail to pick ' + str(self._target_pick_object))
-        else:
-            rospy.loginfo('target block pose illegal, No cartesian pose found corresponding to this block pose')
-            rospy.loginfo('target block pose: ' + str_pose)
-
-    def apply_action(self, state, action):
-        print("enter apply action function")
-        conf, holding, block_poses = state
-        name, args = action
-        if name == 'move':
-            self._pick_success = True
-            
-            if self._last_gripper_action == 'pick':
-                result = self.gripper_width_test()
-                if result == True:
-                    print('Gripper feedback: Gripping success')
-                    self._pick_success = True
-            else:
-                result = True
-            
-            if result == True:
-                rospy.loginfo('moving')
-                _, conf = args
-                x, y = conf
-                pose = np.array([x, y])
-                print('target block pose: {}'.format(str(pose)))
-                print('available block pose inverse: {}'.format(self._available_block_pose_inverse))
-                if str(pose) in self._available_block_pose_inverse.keys():
-                    self._target_pick_object = self._available_block_pose_inverse[str(pose)]
-                    rospy.loginfo('Going to pick the object called: ' + str(self._target_pick_object))
-                else:
-                    rospy.loginfo('Going to place the object called: ' + str(self._target_pick_object))
-                self.mapping_move(str(pose))
-                
-            else:
-                rospy.loginfo('couldnt grasp the object')  
-                self._pick_success = False
-                
-        elif name == 'pick':
-            rospy.loginfo('pick')
-            holding, _, _ = args
-            del block_poses[holding]
-            self._motion_planner.pick()
-            self._last_gripper_action = name
-            print('{} is in hand now'.format(self._target_pick_object))
-        elif name == 'place':
-            rospy.loginfo('place')
-            block, pose, _ = args
-            holding = None
-            block_poses[block] = pose
-            print('nothing in hand')
-            self._motion_planner.place()
-            self._last_gripper_action = name
-            
-            if self._pick_success == True:
-                self._completed_objects.append(block)
-            # print("block", block)   
-            # print("completed objects", self._completed_objects)
-            # print("left over objs", )
-            
-        elif name == 'push':
-            block, _, _, pose, conf = args
-            holding = None
-        else:
-            raise ValueError(name)
-        return DiscreteTAMPState(conf, holding, block_poses)
-
-    
-    def gripper_width_test(self):
-        #check if the gripper distance is zero
-        print("joint state")
-        joint_state = rospy.wait_for_message("/joint_states", JointState)
-        gripper_dist = [joint_state.position[0], joint_state.position[1]]
-        print("gripper distance is", gripper_dist)
-        if gripper_dist[0] > 0.0005 and gripper_dist[1] > 0.0005:
-            result = True #successully grabbed the object
-        else:
-            result = False #failed to grab the object
-        return result
-    
-    def apply_plan(self, tamp_problem, plan):
-        print("enter apply plan function")
-        state = tamp_problem.initial
-        self._last_gripper_action = 'place'
-        for action in plan:
-            rospy.loginfo('action: ' + action.name)
-            state = self.apply_action(state, action)
-        self._motion_planner.to_home_pose()
-
-    def task_planner_callback(self, data):
-        print('enter listener callback function')
-        self.once_plan_all()
-        rospy.loginfo(rospy.get_caller_id() + "I heard %s", data.data)
+   
 
 
 if __name__ == '__main__':
     rospy.init_node('task_planner', anonymous=True)
     task_planner = TaskPlanner()
-    
-    
-    task_planner._motion_planner.test()
-    # alpha = 110 * math.pi / 180
-    # test_pose = Pose()
-    # test_pose.position.x = 0.1
-    # test_pose.position.y = 0.2
-    # test_pose.position.z = 0.3
-    # test_pose.orientation.x = 0
-    # test_pose.orientation.y = 0.25881904510252074
-    # test_pose.orientation.z = 0
-    # test_pose.orientation.w = 0.9659258262890683
-    # result = task_planner.get_artificial_intelligence_grasp_pose(test_pose)
-    # print('result: {}'.format(result))
-    # while not rospy.is_shutdown():
-    #     rospy.loginfo('Planner ready, waiting for trigger message!')
-    #     rospy.spin()
+ 
