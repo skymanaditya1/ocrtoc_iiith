@@ -945,13 +945,12 @@ class TaskPlanner(object):
                 print("Going to pick {}\t|\t".format(object_name))
                 self._motion_planner.fake_place()
                 success = self.go_pick_object(object_name=object_name)
-                 # 3. Check if the object is grapsed
-                # success = self.gripper_width_test()
-                                     
+                                                     
                 if success == False:
                     print("Pick failed")
                 else:
                     print("Pick success")
+            
             elif self.search_strings([name], searchable='place') and success==True:
                 print("Going to place {}\t|\t".format(object_name))
                 success = self.go_place_object(object_name)
@@ -974,20 +973,25 @@ class TaskPlanner(object):
         5. Go back to step 1 if all objects are not picked and placed yet
         """
 
+
+        self._motion_planner.test()
+
+
         print("Cycle plan function started executing!")
         left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
         # Remove clear_box from the list of movable objects
-             
+        # temp = []
+        # for object in left_object_labels:
+        #     if 'clear_box' in object:
+        #         continue
+        #     temp.append(object)
+        # left_object_labels = copy.deepcopy(temp)
                    
-        # 1. Create black nodes for target poses
-        # self.black_nodes = self.initialize_target_black_nodes(self.block_labels_with_duplicates)
-        # 2. Create red nodes for initial poses
-        # self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
-            
+        
         count = 0
         label_count = 1
-        while len(left_object_labels) > 0 and count <= 5:
+        while len(left_object_labels) > 0 and count <= 3:
             count += 1
             # 3. Get information about left objects from perception node
             
@@ -1265,7 +1269,9 @@ class TaskPlanner(object):
         print(" grasp pose is")
         print(grasp_pose)
                 
-        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+        # grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+        
+        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.1)
         
         
         orientation_q = grasp_pose.orientation
@@ -1459,17 +1465,20 @@ class TaskPlanner(object):
 if __name__ == '__main__':
     rospy.init_node('task_planner', anonymous=True)
     task_planner = TaskPlanner()
-    alpha = 110 * math.pi / 180
-    test_pose = Pose()
-    test_pose.position.x = 0.1
-    test_pose.position.y = 0.2
-    test_pose.position.z = 0.3
-    test_pose.orientation.x = 0
-    test_pose.orientation.y = 0.25881904510252074
-    test_pose.orientation.z = 0
-    test_pose.orientation.w = 0.9659258262890683
-    result = task_planner.get_artificial_intelligence_grasp_pose(test_pose)
-    print('result: {}'.format(result))
+    
+    
+    task_planner._motion_planner.test()
+    # alpha = 110 * math.pi / 180
+    # test_pose = Pose()
+    # test_pose.position.x = 0.1
+    # test_pose.position.y = 0.2
+    # test_pose.position.z = 0.3
+    # test_pose.orientation.x = 0
+    # test_pose.orientation.y = 0.25881904510252074
+    # test_pose.orientation.z = 0
+    # test_pose.orientation.w = 0.9659258262890683
+    # result = task_planner.get_artificial_intelligence_grasp_pose(test_pose)
+    # print('result: {}'.format(result))
     # while not rospy.is_shutdown():
     #     rospy.loginfo('Planner ready, waiting for trigger message!')
     #     rospy.spin()
