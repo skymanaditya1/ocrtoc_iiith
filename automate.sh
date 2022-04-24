@@ -10,7 +10,7 @@ source ~/ocrtoc_ws/devel/setup.bash
 
 for t in ${tasks[@]}; do
 	echo $t starts now!
-	roslaunch ocrtoc_task bringup_simulator_pybullet.launch task_index:=$t &
+	roslaunch ocrtoc_task bringup_simulator_sapien.launch task_index:=$t &
   	process1=$!
 
 	sleep 60
