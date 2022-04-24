@@ -1709,7 +1709,7 @@ class TaskPlanner(object):
         print(" grasp pose is")
         print(grasp_pose)
                 
-        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.1)
         
         
         orientation_q = grasp_pose.orientation
@@ -1758,7 +1758,7 @@ class TaskPlanner(object):
                 print(" grasp pose is")
                 print(grasp_pose)
                 
-                grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+                grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.1)
                 
                 plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action=self._last_gripper_action)  # move in cartesian discrete upright path
                 if plan_result:
