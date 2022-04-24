@@ -8,7 +8,7 @@ text = open("/root/ocrtoc_ws/src/result.csv", "r")
 text = ''.join([i for i in text]) \
     .replace("Scene mean score:", " ")
 text = ''.join([i for i in text]) \
-    .replace("Task name:", "Task :")
+    .replace("Task name:", " ")
 text = ''.join([i for i in text]) \
     .replace("Time cost:", " ")
 x = open("/root/ocrtoc_ws/src/result.csv","w")

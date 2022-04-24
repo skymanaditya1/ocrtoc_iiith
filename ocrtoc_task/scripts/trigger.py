@@ -119,7 +119,7 @@ if __name__ == '__main__':
 
         # 6. Calculate Score
         score_calculator = ScoreCalculator(task_index = task_index)
-        scene_mean_score = score_calculator.calculate_score()
+        scene_mean_score = score_calculator.calculate_score()*100
 
         # 7. (RRC team form IIITH's addition) Save the scores to a log file
         log_file_path = '/root/ocrtoc_ws/src/result.txt'
