@@ -72,6 +72,8 @@ class MotionPlanner(object):
                                  config_parameters["home_joint7"] * pi / 180]
 
             self._group_name = config_parameters["group_name"]
+        
+        
 
         moveit_commander.roscpp_initialize(sys.argv)
         self._move_group = moveit_commander.MoveGroupCommander(self._group_name)
@@ -93,6 +95,11 @@ class MotionPlanner(object):
 
         ee_transform = self._transformer.lookup_ros_transform("panda_ee_link", "panda_link8")
         self._ee_transform_matrix = self._transformer.ros_transform_to_matrix4x4(ee_transform.transform)
+        
+        self.rest_pose = [-0.112957249941, 2.9801544038e-05, 0.590340135745]
+        self.rest_pose1 = [-0.12298057805, 4.16824876068e-05, 0.600282040139]
+        
+       
 
         self.to_home_pose()
         # self.test()
@@ -138,7 +145,7 @@ class MotionPlanner(object):
         self.move_cartesian_space_upright(pose_goal)
         
         rospy.sleep(2)
-        time.sleep(10)
+        time.sleep(30)
         
         
         print("test 3 GOAL to REST POSE manual ")
@@ -408,6 +415,8 @@ class MotionPlanner(object):
         if pose_goal.position.z < 0.005:
             pose_goal.position.z = 0.01
         
+        print("pose goal", pose_goal)
+       
         quaternion = [pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w]
         
         (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
@@ -422,13 +431,17 @@ class MotionPlanner(object):
         # group_goal = pose_goal
 
         points_to_target = self.get_points_to_target_upright(group_goal)
+        
+        print("points to target")
+        print(points_to_target)
+        
         for i, point in enumerate(points_to_target):
             
             if i==1 and last_gripper_action=='place':
                 self.to_rest_pose()
             
             if i==1 and last_gripper_action=='pick':
-                
+                self.to_rest_pose()
                 print("At rest pose")
                 success = self.gripper_width_test()
                 if success == False:
@@ -697,22 +710,33 @@ class MotionPlanner(object):
         points_to_target = []
         current_pose = self._move_group.get_current_pose(self._end_effector).pose
         
-        exit_pose = copy.deepcopy(current_pose)
         
+        exit_pose = copy.deepcopy(current_pose)
         quaternion = [exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w]
         (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
         quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
         exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w = quaternion
-        exit_pose.position.z += self._up1
+        
+        #to prebvent a bug during pick. This is a fix not a solution. 
+        curr_pose = [ round(current_pose.position.x, 2), round(current_pose.position.y, 2), round(current_pose.position.z, 2) ]
+        rest_pose = [ round(elem, 2) for elem in self.rest_pose ]
+        rest_pose1 = [ round(elem, 2) for elem in self.rest_pose1 ]
+        
+        if curr_pose != rest_pose and curr_pose!=rest_pose1:
+            exit_pose.position.z += self._up1
         points_to_target.append(copy.deepcopy(exit_pose))
+        
+        print("curr pose", curr_pose)
+        print("rest pose", rest_pose)
 
         enter_pose = copy.deepcopy(target_pose)
         enter_pose.position.z += self._up2
 
         points_to_target.append(copy.deepcopy(enter_pose))
         points_to_target.append(copy.deepcopy(target_pose))
+        
         return points_to_target
-
+    
     # get a list of via points from current position to target position (add exit and entrance point to pick and place position)
     def get_points_to_target(self, target_pose, via_up = False):
         points_to_target = []

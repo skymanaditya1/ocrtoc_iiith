@@ -91,8 +91,7 @@ class TaskPlanner(object):
         
         
         self.clear_box_flag = False
-        
-        
+              
         
         self.block_labels = blocks
         self.object_goal_pose_dict = self.get_goal_pose_dict(self.block_labels, goal_cartesian_poses)
@@ -112,29 +111,7 @@ class TaskPlanner(object):
         print("task planner constructed")
 
        
-    def get_goal_pose_dict(self, block_labels, goal_poses):
-        '''
-        Given a list of goal poses and block labels, this function returns a dictionary with labels as keys
-        
-        Parameters:
-        block_labels: List of labels (strings)
-        goal_poses: List of lists of block poses 
-        '''
-        goal_pose_dict = {}
-        # print(zip(block_labels, goal_poses))
-        
-               
-        for label, poses in zip(block_labels, goal_poses):
-            
-            if self.search_strings2(object, ['clear_box']): #, 'book', 'round_plate', 'plate_holder']):
-                continue
-                       
-            print("Poses: {}".format(poses))
-            print("Poses type: {}".format(type(poses)))
-            for i, pose in enumerate(poses.poses):
-                goal_pose_dict["{}_v{}".format(label, i)] = pose
-            # goal_pose_dict[label] = pose
-        return goal_pose_dict    
+    
 
     def get_pose_perception(self, target_object_list):
         """
@@ -307,17 +284,6 @@ class TaskPlanner(object):
         """Stores the data for the problem."""
         data = {}
         from scipy.spatial import distance_matrix
-
-        #nodes = [[0, 0], [41, 44], [2, 1], [27, 5], [3, 49], [20, 4], [18, 4], [39, 44], [23, 12]] # 2431
-        #nodes = [[0, 0], [23, 28], [34, 28], [42, 46], [11, 44], [19, 25], [36, 27], [0, 25], [7, 38]] # 4123
-        #nodes = [[6, 6], [16, 27], [14, 2], [24, 45], [6, 14], [49, 27], [44, 0], [17, 11], [36, 17]] # 4132
-        #nodes = [[0, 0], [43, 19], [18, 47], [41, 38], [50, 16], [45, 12], [32, 17], [4, 5], [43, 32]] # 2143
-        #nodes = [[6, 6], [11, 47], [27, 4], [5, 48], [21, 34], [26, 19], [37, 10], [8, 37], [29, 9]] # 3142
-        # nodes = [[0, 0], [31, 34], [19, 27], [9, 19], [12, 34], [43, 32], [5, 26], [17, 25], [46, 43]] # 2301 Working default
-        #nodes = [[9, 1], [22, 29], [49, 35], [20, 19], [8, 13], [8, 13], [16, 18], [13, 11]] # 1432
-        # Trying 3D nodes
-        # nodes = [[0, 0, 0], [31, 34, 31], [19, 27, 1], [9, 19, 5], [12, 34, 10], [43, 32, 38], [5, 26, 65], [17, 25, 20], [46, 43, 90] ]
-
         dm = distance_matrix(nodes, nodes).tolist()
 
         data['distance_matrix'] = dm
@@ -554,11 +520,13 @@ class TaskPlanner(object):
         5. Go back to step 1 if all objects are not picked and placed yet
         """
 
+        # self._motion_planner.test()
+
+        # exit()
+
         print("Cycle plan function started executing!")
         left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
-        
-                  
         
         count = 0
         while len(left_object_labels) > 0 and count <= 5:
@@ -724,7 +692,7 @@ class TaskPlanner(object):
         print(" grasp pose is")
         print(grasp_pose)
                 
-        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+        grasp_pose.position.z = grasp_pose.position.z + 0.1
         
         
         orientation_q = grasp_pose.orientation
