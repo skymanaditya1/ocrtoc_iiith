@@ -52,6 +52,198 @@ from ortools.constraint_solver import pywrapcp
 from scipy import signal
 from scipy.spatial.transform import Rotation
 
+# for grasp refinement
+from PIL import Image
+from time import sleep
+
+
+# Grasp refinement and collision checking class
+class GraspModification:
+    def __init__(self, search_space_diameter = 20):
+        '''Grasp modification class
+        Modifies or finds a better grasp at a given location
+        search_space_diameter: the max width and length of the heigtmap of the scene, to be searched in for
+        '''
+        self.ee_length = 14
+        self.ee_width = 4
+        self.finger_max_dist = 8
+        self.finger_len = 1 # Length of the face of finger facing the ground
+        self.finger_bre = 1 # Breadth of the face of the finger facing the ground
+        self.finger_height = 8
+        self.max_penetration_len = 4 # Max amount of penetration of the object between the two fingers
+    def get_gripper_standard_collision_map_1cm_resolution(self):
+        '''Gets the gripper collision map that can be used to evaluate collisions at different points. 
+        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
+        the length of the table)
+        The resolution of the map -> 1 pixel occupies 1cm*1cm square box in the real world
+        '''
+        collision_map = np.full(shape=(self.ee_length, self.ee_length), fill_value=10) 
+        for i in range(int(self.ee_length//2 - self.ee_width//2), int(self.ee_length//2 + self.ee_width//2)):
+            collision_map[i:i+1] = 0
+            # print("ee - {}".format(i))
+            if i == (self.ee_length//2 - 1) or i == self.ee_length//2:
+                collision_map[i, 2] = -1*self.finger_height # self.max_penetration_len # or use self.finger_height, if full penetration is allowed
+                collision_map[i, 11] = -1*self.finger_height # self.max_penetration_len
+                collision_map[i, 3:11] = -1*self.max_penetration_len # (not allowing any object to penetrate more than 4 cm towards the EE, between the fingers)
+                # print("finger - {}".format(i))
+            
+        print("Final collision map:\n{}".format(collision_map))
+        return collision_map
+
+    def get_gripper_standard_collision_map_5mm_resolution(self):
+        '''Gets the gripper collision map that can be used to evaluate collisions at different points. 
+        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
+        the length of the table)
+        The resolution of the map -> 1 pixel occupies 0.5cm*0.5cm square box in the real world
+        '''
+        collision_map = np.full(shape=(self.ee_length*2, self.ee_length*2), fill_value=10) 
+        for i in range(int(2*self.ee_length//2 - 2*self.ee_width//2), int(2*self.ee_length//2 + 2*self.ee_width//2)):
+            collision_map[i:i+1] = 0
+            print("ee - {}".format(i))
+            # print(range((2*self.ee_length//2 - 2),  2*self.ee_length//2+2))
+            if i in range((2*self.ee_length//2 - 2),  2*self.ee_length//2+2):
+                collision_map[i, 4:6] = -1*self.finger_height# self.max_penetration_len # or use self.finger_height, if full penetration is allowed
+                collision_map[i, 22:24] = -1*self.finger_height # self.max_penetration_len
+                print("finger - {}".format(i))
+            
+        print("Final collision map:\n{}".format(collision_map))
+        return collision_map
+
+    def get_grip_validation_map_1cm_res(self):
+        '''Generates grip validation map with 1cm resolution (1 pixel == 1cm*1cm area)
+        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
+        the length of the table)
+        Used for grasp validation 
+        Size = 14*14 (general)
+        '''
+        v_map = np.full(shape=(self.ee_length, self.ee_length), fill_value=10) 
+        for i in range(int(self.ee_length//2 - self.ee_width//2), int(self.ee_length//2 + self.ee_width//2)):
+            # print("ee - {}".format(i))
+            if i == (self.ee_length//2 - 1) or i == self.ee_length//2:
+                v_map[i:i+1, 3:11] = 0
+            
+        print("Final validation map:\n{}".format(v_map))
+        return v_map
+
+
+    def rotate_kernel_map(self, kernel_map, angle):
+        '''Converts the given map into an image and rotates it by the given angle
+        Parameters:
+        kernel_map = np.ndarray (2D array)
+        angle: in degrees
+        '''
+        # modified_k_map = kernel_map + 10
+        # print("Modified map: {}".format(modified_k_map))
+        print("Kernel map: {}".format(abs(kernel_map+self.finger_height)))
+        k_img = Image.fromarray(np.uint8(kernel_map+self.finger_height)) # Converts all negative elements to +ve (will be reversed later)
+        r_img = k_img.rotate(angle=angle, fillcolor=10+self.finger_height) # Angle in degrees
+        rk_map = np.array(r_img, dtype=float) 
+        print("Rotated kernel: {}".format(rk_map-self.finger_height))
+        
+        cv2.imshow("Kernel image", np.uint8((kernel_map)*15))
+        cv2.waitKey(0)
+
+        cv2.imshow("Rotated image", np.uint8((rk_map-self.finger_height)*15))
+        cv2.waitKey(0)
+        # k_img.show()
+        # sleep(10)
+        # r_img.show()
+        # sleep(30)
+        return rk_map-self.finger_height
+
+    def rotate_v_map(self, kernel_map, angle):
+        '''Converts the given map into an image and rotates it by the given angle
+        Parameters:
+        kernel_map = np.ndarray (2D array)
+        angle: in degrees
+        '''
+        # modified_k_map = kernel_map + 10
+        # print("Modified map: {}".format(modified_k_map))
+        print("Valid map: {}".format(abs(kernel_map+self.finger_height)))
+        k_img = Image.fromarray(np.uint8(kernel_map+self.finger_height)) # Converts all negative elements to +ve (will be reversed later)
+        r_img = k_img.rotate(angle=angle, fillcolor=10+self.finger_height) # Angle in degrees
+        rk_map = np.array(r_img, dtype=float) 
+        print("Rotated Valid: {}".format(rk_map-self.finger_height))
+        
+        cv2.imshow("Valid image", np.uint8((kernel_map)*15))
+        cv2.waitKey(0)
+
+        cv2.imshow("Rotated Valid image", np.uint8((rk_map-self.finger_height)*15))
+        cv2.waitKey(0)
+        return rk_map-self.finger_height
+
+    def generate_random_h_map_1cm_res(self):
+        '''Generates a height map (random) of size (20*20) with resolution of 1cm
+        '''
+        h_map = np.zeros(shape=(20, 20), dtype=float)
+
+        h_map[3:10] = 6
+
+        print("Height map (random): {}".format(h_map))
+        return h_map
+
+    def return_collision_and_valid_maps(self, scene_hmap, gripper_map, v_map, grasp_height):
+        '''Checks for collisions between scene and gripper and returns a map, with 1s placed at 
+        collision free areas, and 0s placed in all the other places
+        scene_hmap: 20*20
+        gripper_map: 14*14 map
+        '''
+        n_r, n_c = scene_hmap.shape
+        g_nr, g_nc = gripper_map.shape
+        collision_map = np.zeros(shape=(n_r, n_c))
+        valid_map = np.zeros(shape=(n_r, n_c))
+
+        for i in range(0, n_r - g_nr):
+            for j in range(0, n_c - g_nc):
+                sub_map = scene_hmap[i:i+g_nr, j:j+g_nc]
+                print("Sub map shape: {}".format(sub_map.shape))
+                # Collision checking
+                if np.any(gripper_map + grasp_height - sub_map<0): # Collision detected
+                    collision_map[i+int(g_nr/2), j+int(g_nc/2)] = 0
+                else: # No collision
+                    collision_map[i+int(g_nr/2), j+int(g_nc/2)] = 1
+                    if np.min(v_map+grasp_height-self.finger_height - sub_map) < -1:# Valid grasp pose
+                        valid_map[i+int(g_nr/2), j+int(g_nc/2)] = np.max(-1*(v_map+grasp_height-self.finger_height - sub_map))# 1
+    
+        return collision_map, valid_map
+
+    def pcd_to_height_map_1cm_res(self, pcd, target_pos, x_range=0.30, y_range=0.30):
+        '''Cuts a 30cm*30cm boundary around target pos in the given pcd and converts it into a height map
+        This gives an effective search space of size - 17cm*17cm (Assuming the kernel map to be of size 
+        14cm * 14cm)
+        Height map resolution: 1cm (1 pixel == 1cm*1cm)
+        Parameters
+        pcd: pcd.points (np.array) (point cloud of the scene)
+        target_pos: [x, y, z]: list (target grasp pose)
+        Returns:
+        (height_map, (height_map_origin_coords_world_frame)) - 
+        '''
+        # For resolution of 1cm*1cm, multiply pcd by 100
+        pcd_m = (np.round(pcd * 100))
+        pcd_m[:, 2] = pcd[:, 2] # Only x and y coordinates are scaled up to represent pixels. Z values retain their meaning (value in cm)
+        x_minmax = [target_pos[0] - (x_range/2), target_pos[0]+(x_range/2 - 0.01)]*100
+        y_minmax = [target_pos[1] - (y_range/2), target_pos[1]+(y_range/2 - 0.01)]*100
+        # x_range = 0.6
+        # y_range = 1.2
+
+        pixel_maxes = np.zeros(shape=(int(x_range*100), int(y_range*100)), dtype=float)
+
+        for point in pcd:
+            # print(point)
+            if point[0] >= x_minmax[0] and point[0] <= x_minmax[1] and point[1] >= y_minmax[0] and point[1] <= y_minmax[1]:
+                # Valid point
+                # print("Yes")
+                pixel_coord = [int(100*(point[0] - x_minmax[0])), int(100*(point[1] - y_minmax[0]))]
+                print(point, pixel_coord)
+                if pixel_maxes[pixel_coord[0], pixel_coord[1]] < point[2]:
+                    # print("Yes")
+                    pixel_maxes[pixel_coord[0], pixel_coord[1]] = point[2]
+        
+        cv2.imshow("Scene hmap", np.uint8(pixel_maxes*255/np.max(pixel_maxes)))
+        cv2.waitKey(0)
+
+        return pixel_maxes
+
 
 # Stacking related functions
 class SGNode:
@@ -829,6 +1021,8 @@ class TaskPlanner(object):
         '''
         return any([searchable in x for x in string_list])
         
+    def get_color_image(self): # newly added
+        return self.camera_interface.get_numpy_image_with_encoding(self.color_topic_name)[0]
         
     def get_color_image_frame_id(self):
         '''Realsense topic'''
