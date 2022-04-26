@@ -53,196 +53,8 @@ from scipy import signal
 from scipy.spatial.transform import Rotation
 
 # for grasp refinement
-from PIL import Image
+# from PIL import Image
 from time import sleep
-
-
-# Grasp refinement and collision checking class
-class GraspModification:
-    def __init__(self, search_space_diameter = 20):
-        '''Grasp modification class
-        Modifies or finds a better grasp at a given location
-        search_space_diameter: the max width and length of the heigtmap of the scene, to be searched in for
-        '''
-        self.ee_length = 14
-        self.ee_width = 4
-        self.finger_max_dist = 8
-        self.finger_len = 1 # Length of the face of finger facing the ground
-        self.finger_bre = 1 # Breadth of the face of the finger facing the ground
-        self.finger_height = 8
-        self.max_penetration_len = 4 # Max amount of penetration of the object between the two fingers
-    def get_gripper_standard_collision_map_1cm_resolution(self):
-        '''Gets the gripper collision map that can be used to evaluate collisions at different points. 
-        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
-        the length of the table)
-        The resolution of the map -> 1 pixel occupies 1cm*1cm square box in the real world
-        '''
-        collision_map = np.full(shape=(self.ee_length, self.ee_length), fill_value=10) 
-        for i in range(int(self.ee_length//2 - self.ee_width//2), int(self.ee_length//2 + self.ee_width//2)):
-            collision_map[i:i+1] = 0
-            # print("ee - {}".format(i))
-            if i == (self.ee_length//2 - 1) or i == self.ee_length//2:
-                collision_map[i, 2] = -1*self.finger_height # self.max_penetration_len # or use self.finger_height, if full penetration is allowed
-                collision_map[i, 11] = -1*self.finger_height # self.max_penetration_len
-                collision_map[i, 3:11] = -1*self.max_penetration_len # (not allowing any object to penetrate more than 4 cm towards the EE, between the fingers)
-                # print("finger - {}".format(i))
-            
-        print("Final collision map:\n{}".format(collision_map))
-        return collision_map
-
-    def get_gripper_standard_collision_map_5mm_resolution(self):
-        '''Gets the gripper collision map that can be used to evaluate collisions at different points. 
-        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
-        the length of the table)
-        The resolution of the map -> 1 pixel occupies 0.5cm*0.5cm square box in the real world
-        '''
-        collision_map = np.full(shape=(self.ee_length*2, self.ee_length*2), fill_value=10) 
-        for i in range(int(2*self.ee_length//2 - 2*self.ee_width//2), int(2*self.ee_length//2 + 2*self.ee_width//2)):
-            collision_map[i:i+1] = 0
-            print("ee - {}".format(i))
-            # print(range((2*self.ee_length//2 - 2),  2*self.ee_length//2+2))
-            if i in range((2*self.ee_length//2 - 2),  2*self.ee_length//2+2):
-                collision_map[i, 4:6] = -1*self.finger_height# self.max_penetration_len # or use self.finger_height, if full penetration is allowed
-                collision_map[i, 22:24] = -1*self.finger_height # self.max_penetration_len
-                print("finger - {}".format(i))
-            
-        print("Final collision map:\n{}".format(collision_map))
-        return collision_map
-
-    def get_grip_validation_map_1cm_res(self):
-        '''Generates grip validation map with 1cm resolution (1 pixel == 1cm*1cm area)
-        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
-        the length of the table)
-        Used for grasp validation 
-        Size = 14*14 (general)
-        '''
-        v_map = np.full(shape=(self.ee_length, self.ee_length), fill_value=10) 
-        for i in range(int(self.ee_length//2 - self.ee_width//2), int(self.ee_length//2 + self.ee_width//2)):
-            # print("ee - {}".format(i))
-            if i == (self.ee_length//2 - 1) or i == self.ee_length//2:
-                v_map[i:i+1, 3:11] = 0
-            
-        print("Final validation map:\n{}".format(v_map))
-        return v_map
-
-
-    def rotate_kernel_map(self, kernel_map, angle):
-        '''Converts the given map into an image and rotates it by the given angle
-        Parameters:
-        kernel_map = np.ndarray (2D array)
-        angle: in degrees
-        '''
-        # modified_k_map = kernel_map + 10
-        # print("Modified map: {}".format(modified_k_map))
-        print("Kernel map: {}".format(abs(kernel_map+self.finger_height)))
-        k_img = Image.fromarray(np.uint8(kernel_map+self.finger_height)) # Converts all negative elements to +ve (will be reversed later)
-        r_img = k_img.rotate(angle=angle, fillcolor=10+self.finger_height) # Angle in degrees
-        rk_map = np.array(r_img, dtype=float) 
-        print("Rotated kernel: {}".format(rk_map-self.finger_height))
-        
-        cv2.imshow("Kernel image", np.uint8((kernel_map)*15))
-        cv2.waitKey(0)
-
-        cv2.imshow("Rotated image", np.uint8((rk_map-self.finger_height)*15))
-        cv2.waitKey(0)
-        # k_img.show()
-        # sleep(10)
-        # r_img.show()
-        # sleep(30)
-        return rk_map-self.finger_height
-
-    def rotate_v_map(self, kernel_map, angle):
-        '''Converts the given map into an image and rotates it by the given angle
-        Parameters:
-        kernel_map = np.ndarray (2D array)
-        angle: in degrees
-        '''
-        # modified_k_map = kernel_map + 10
-        # print("Modified map: {}".format(modified_k_map))
-        print("Valid map: {}".format(abs(kernel_map+self.finger_height)))
-        k_img = Image.fromarray(np.uint8(kernel_map+self.finger_height)) # Converts all negative elements to +ve (will be reversed later)
-        r_img = k_img.rotate(angle=angle, fillcolor=10+self.finger_height) # Angle in degrees
-        rk_map = np.array(r_img, dtype=float) 
-        print("Rotated Valid: {}".format(rk_map-self.finger_height))
-        
-        cv2.imshow("Valid image", np.uint8((kernel_map)*15))
-        cv2.waitKey(0)
-
-        cv2.imshow("Rotated Valid image", np.uint8((rk_map-self.finger_height)*15))
-        cv2.waitKey(0)
-        return rk_map-self.finger_height
-
-    def generate_random_h_map_1cm_res(self):
-        '''Generates a height map (random) of size (20*20) with resolution of 1cm
-        '''
-        h_map = np.zeros(shape=(20, 20), dtype=float)
-
-        h_map[3:10] = 6
-
-        print("Height map (random): {}".format(h_map))
-        return h_map
-
-    def return_collision_and_valid_maps(self, scene_hmap, gripper_map, v_map, grasp_height):
-        '''Checks for collisions between scene and gripper and returns a map, with 1s placed at 
-        collision free areas, and 0s placed in all the other places
-        scene_hmap: 20*20
-        gripper_map: 14*14 map
-        '''
-        n_r, n_c = scene_hmap.shape
-        g_nr, g_nc = gripper_map.shape
-        collision_map = np.zeros(shape=(n_r, n_c))
-        valid_map = np.zeros(shape=(n_r, n_c))
-
-        for i in range(0, n_r - g_nr):
-            for j in range(0, n_c - g_nc):
-                sub_map = scene_hmap[i:i+g_nr, j:j+g_nc]
-                print("Sub map shape: {}".format(sub_map.shape))
-                # Collision checking
-                if np.any(gripper_map + grasp_height - sub_map<0): # Collision detected
-                    collision_map[i+int(g_nr/2), j+int(g_nc/2)] = 0
-                else: # No collision
-                    collision_map[i+int(g_nr/2), j+int(g_nc/2)] = 1
-                    if np.min(v_map+grasp_height-self.finger_height - sub_map) < -1:# Valid grasp pose
-                        valid_map[i+int(g_nr/2), j+int(g_nc/2)] = np.max(-1*(v_map+grasp_height-self.finger_height - sub_map))# 1
-    
-        return collision_map, valid_map
-
-    def pcd_to_height_map_1cm_res(self, pcd, target_pos, x_range=0.30, y_range=0.30):
-        '''Cuts a 30cm*30cm boundary around target pos in the given pcd and converts it into a height map
-        This gives an effective search space of size - 17cm*17cm (Assuming the kernel map to be of size 
-        14cm * 14cm)
-        Height map resolution: 1cm (1 pixel == 1cm*1cm)
-        Parameters
-        pcd: pcd.points (np.array) (point cloud of the scene)
-        target_pos: [x, y, z]: list (target grasp pose)
-        Returns:
-        (height_map, (height_map_origin_coords_world_frame)) - 
-        '''
-        # For resolution of 1cm*1cm, multiply pcd by 100
-        pcd_m = (np.round(pcd * 100))
-        pcd_m[:, 2] = pcd[:, 2] # Only x and y coordinates are scaled up to represent pixels. Z values retain their meaning (value in cm)
-        x_minmax = [target_pos[0] - (x_range/2), target_pos[0]+(x_range/2 - 0.01)]*100
-        y_minmax = [target_pos[1] - (y_range/2), target_pos[1]+(y_range/2 - 0.01)]*100
-        # x_range = 0.6
-        # y_range = 1.2
-
-        pixel_maxes = np.zeros(shape=(int(x_range*100), int(y_range*100)), dtype=float)
-
-        for point in pcd:
-            # print(point)
-            if point[0] >= x_minmax[0] and point[0] <= x_minmax[1] and point[1] >= y_minmax[0] and point[1] <= y_minmax[1]:
-                # Valid point
-                # print("Yes")
-                pixel_coord = [int(100*(point[0] - x_minmax[0])), int(100*(point[1] - y_minmax[0]))]
-                print(point, pixel_coord)
-                if pixel_maxes[pixel_coord[0], pixel_coord[1]] < point[2]:
-                    # print("Yes")
-                    pixel_maxes[pixel_coord[0], pixel_coord[1]] = point[2]
-        
-        cv2.imshow("Scene hmap", np.uint8(pixel_maxes*255/np.max(pixel_maxes)))
-        cv2.waitKey(0)
-
-        return pixel_maxes
 
 
 # Stacking related functions
@@ -741,10 +553,29 @@ class TaskPlanner(object):
         self.kinect_depth_topic_name= '/kinect/depth_to_color/image_raw'
         self.kinect_points_topic_name= '/kinect/depth/points'
         self.transform_from_frame= 'world'
+
+        '''
+        use_camera: both
+arm_topic: arm_controller/command
+color_info_topic_name: /realsense/color/camera_info
+color_topic_name: /realsense/color/image_raw
+depth_topic_name: /realsense/aligned_depth_to_color/image_raw
+points_topic_name: /realsense/depth/points
+kinect_color_topic_name: /kinect/color/image_rect_color
+kinect_depth_topic_name: /kinect/depth_to_color/image_raw
+kinect_points_topic_name: /kinect/depth/points
+transform_from_frame: world
+        '''
         
         # self.arm_controller = ArmController(topic = self.config['arm_topic'])
         self.camera_interface = CameraInterface()
         self.transform_interface = TransformInterface()
+        # Subscribing to kinect and setting it up (external camera)
+        self.camera_interface.subscribe_topic(self.kinect_color_topic_name, Image)
+        self.camera_interface.subscribe_topic(self.kinect_points_topic_name, PointCloud2)
+        time.sleep(2)
+        self.kinect_color_transform_to_frame = self.get_kinect_color_image_frame_id()
+        self.kinect_points_transform_to_frame = self.get_kinect_points_frame_id()
         # Subscribing to realsense and setting it up (camera attached to arm's end effector link)
         self.camera_interface.subscribe_topic(self.color_info_topic_name, CameraInfo)
         self.camera_interface.subscribe_topic(self.color_topic_name, Image)
@@ -752,13 +583,6 @@ class TaskPlanner(object):
         time.sleep(2)
         self.color_transform_to_frame = self.get_color_image_frame_id()
         self.points_transform_to_frame = self.get_points_frame_id()
-        
-        # Subscribing to kinect and setting it up (external camera)
-        self.camera_interface.subscribe_topic(self.kinect_color_topic_name, Image)
-        self.camera_interface.subscribe_topic(self.kinect_points_topic_name, PointCloud2)
-        time.sleep(2)
-        self.kinect_color_transform_to_frame = self.get_kinect_color_image_frame_id()
-        self.kinect_points_transform_to_frame = self.get_kinect_points_frame_id()
         
         # Reconstruction config
         self.reconstruction_config = {
@@ -807,6 +631,8 @@ class TaskPlanner(object):
         self.object_stacks = {}
 
         self.object_entities = {}
+
+        # self.grasp_refine_class = GraspModification()
         
         print("#"*40)
         print("Block labels: {}".format(self.block_labels))
@@ -1023,6 +849,23 @@ class TaskPlanner(object):
         
     def get_color_image(self): # newly added
         return self.camera_interface.get_numpy_image_with_encoding(self.color_topic_name)[0]
+
+    def get_color_camK(self): # newly added
+        d = self.camera_interface.get_dict_camera_info(self.color_info_topic_name)
+        return (np.array(d['K']).reshape((3,3)))
+
+    def get_depth_image(self): # newly added
+        return self.camera_interface.get_numpy_image_with_encoding(self.depth_topic_name)[0]
+
+    def get_pcd(self, use_graspnet_camera_frame = False): # newly added
+        pcd = self.camera_interface.get_o3d_pcd(self.points_topic_name)
+        return pcd
+
+    def get_color_transform_matrix(self): # newly added 
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.color_transform_to_frame)
+
+    def get_points_transform_matrix(self): # newly added
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.points_transform_to_frame)
         
     def get_color_image_frame_id(self):
         '''Realsense topic'''
@@ -1066,7 +909,7 @@ class TaskPlanner(object):
     
     def capture_pcd(self, use_camera='kinect'):
         t1 = time.time()
-        pcds = []
+        pcd = None
         color_images = []
         camera_poses = []
         # capture images by realsense. The camera will be moved to different locations.
@@ -1088,18 +931,58 @@ class TaskPlanner(object):
                 # if self.debug:
                 #     print('points_trans_matrix:', points_trans_matrix)
                 # camera_poses.append(self.get_kinect_color_transform_matrix())
-            return full_pcd_kinect
+            # return full_pcd_kinect
+            pcd = full_pcd_kinect
         elif use_camera == 'realsense':
-            print("Try with Kinect please, Realsense is not ready yet;( ******++++++++++++***********")
+            print("Using real sense to get the image;( ******++++++++++++***********")
+            color_image = self.get_color_image()
+            color_image = cv2.cvtColor(color_image, cv2.COLOR_RGBA2RGB)
+            if self.debug:
+                cv2.imshow('color', cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+            color_images.append(color_image)
+
+            points_trans_matrix = self.get_points_transform_matrix()
+            if self.debug:
+                print('points_trans_matrix:', points_trans_matrix)
+            camera_poses.append(self.get_color_transform_matrix())
+            pcd = self.get_pcd(use_graspnet_camera_frame = False)
+            pcd.transform(points_trans_matrix)
+            pcd = self.kinect_process_pcd(pcd, self.reconstruction_config)
+            if self.debug:
+                frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+                o3d.visualization.draw_geometries([pcd, frame])
+
+            pcd = pcd        
+            # return pcd
+            # pcds.append(pcd)
+        pcd.estimate_normals()
+        pcd, _ = pcd.remove_statistical_outlier(
+            nb_neighbors = self.reconstruction_config['nb_neighbors'], # self.nb_neighbors_config=10 # ,
+            std_ratio = self.reconstruction_config['std_ratio'] # self.std_ratio_config = 0.5 # reconstruction_config['std_ratio']
+        )
+
+        return pcd
         
-    def get_point_cloud_from_kinect(self):
+    def get_point_cloud_from_kinect(self, debug=False):
         '''
         Capture and get point cloud from Kinect camera (Will be used to build occupancy map)
         '''
         pcd_kinect = self.capture_pcd(use_camera='kinect')
-        # import open3d as o3d
-        # o3d.visualization.draw_geometries([pcd_kinect])
+        if debug==True:
+            # import open3d as o3d
+            o3d.visualization.draw_geometries([pcd_kinect])
         return pcd_kinect
+
+    def get_point_cloud_from_realsense(self, debug=False):
+        '''
+        Capture and get point cloud from RealSense camera (will be used to build height maps for grasp checking and refinement)
+        '''
+        pcd_realsense = self.capture_pcd(use_camera='realsense')
+        if debug==True:
+            o3d.visualization.draw_geometries([pcd_realsense])
+        return pcd_realsense
 
     def create_global_object_dict(self):
         for i, key in enumerate(self.object_stacks.keys()):
@@ -1872,6 +1755,9 @@ class TaskPlanner(object):
         print((roll, pitch, yaw))  
         if abs(yaw) > abs(np.deg2rad(90)) and abs(yaw) < abs(np.deg2rad(270)):
             yaw = yaw + np.pi
+
+        # yaw = 0 # Testing 
+
         orientation_q = quaternion_from_euler(roll, pitch, yaw)
         pick_grasp_pose.orientation = Quaternion(*orientation_q)   
         

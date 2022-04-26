@@ -37,3 +37,17 @@ Task name: 6-2-1 | Scene mean score: 0.287485835291 | Time cost: 404.204
 Task name: 6-2-3 | Scene mean score: 0.434129960841 | Time cost: 90.86
 Task name: 6-3-1 | Scene mean score: 0.361832789934 | Time cost: 602.0
 Task name: 6-3-2 | Scene mean score: 0.398914071848 | Time cost: 602.0
+Task name: 6-2-1 | Scene mean score: 0.261448641771 | Time cost: 284.424
+Task name: 1-1-1 | Scene mean score: 0.339853542464 | Time cost: 11.588506937
+Task name: 1-1-1 | Scene mean score: 0.339795179817 | Time cost: 8.55404210091
+Task name: 1-1-1 | Scene mean score: 0.339464410656 | Time cost: 7.72063612938
+Task name: 1-1-1 | Scene mean score: 0.339817574218 | Time cost: 11.7389950752
+Task name: 1-1-1 | Scene mean score: 0.33927660697 | Time cost: 11.8557889462
+Task name: 1-1-1 | Scene mean score: 0.340199577036 | Time cost: 10.7545421124
+Task name: 1-1-1 | Scene mean score: 0.0848371090933 | Time cost: 308.175889969
+Task name: 1-1-1 | Scene mean score: 0.532086402943 | Time cost: 314.99804306
+Task name: 1-1-1 | Scene mean score: 0.354040978411 | Time cost: 219.198541164
+Task name: 1-1-1 | Scene mean score: 0.339776028375 | Time cost: 176.773898125
+Task name: 1-1-1 | Scene mean score: 0.339898273154 | Time cost: 182.172818184
+Task name: 1-1-1 | Scene mean score: 0.339753517784 | Time cost: 197.345717192
+Task name: 1-1-1 | Scene mean score: 0.339529029641 | Time cost: 197.589401007

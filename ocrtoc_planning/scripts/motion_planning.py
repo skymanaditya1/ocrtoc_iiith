@@ -18,7 +18,262 @@ import rospy
 import time
 from sensor_msgs.msg import JointState
 
+from tf.transformations import euler_from_quaternion, quaternion_from_euler
+from sensor_msgs.msg import CameraInfo, Image, PointCloud2
+
 from ocrtoc_common.transform_interface import TransformInterface
+from ocrtoc_common.camera_interface import CameraInterface
+
+import numpy as np
+import transforms3d
+# for grasp refinement
+import PIL.Image as PIL_image
+from time import sleep
+import cv2
+import open3d as o3d
+
+# import open3d_plus as o3dp
+
+
+# Grasp refinement and collision checking class
+class GraspModification:
+    def __init__(self, search_space_diameter = 20):
+        '''Grasp modification class
+        Modifies or finds a better grasp at a given location
+        search_space_diameter: the max width and length of the heigtmap of the scene, to be searched in for
+        '''
+        self.ee_length = 14
+        self.ee_width = 4
+        self.finger_max_dist = 8
+        self.finger_len = 1 # Length of the face of finger facing the ground
+        self.finger_bre = 1 # Breadth of the face of the finger facing the ground
+        self.finger_height = 8
+        self.max_penetration_len = 8 #4 # Max amount of penetration of the object between the two fingers
+    def get_gripper_standard_collision_map_1cm_resolution(self, inter_finger_dist = 8):
+        '''Gets the gripper collision map that can be used to evaluate collisions at different points. 
+        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
+        the length of the table)
+        The resolution of the map -> 1 pixel occupies 1cm*1cm square box in the real world
+
+        Parameters:
+        inter_finger_dist: distance between the two fingers in cm (default - max finger distance - 8 cm)
+        '''
+        collision_map = np.full(shape=(self.ee_length, self.ee_length), fill_value=10) 
+        for i in range(int(self.ee_length//2 - self.ee_width//2), int(self.ee_length//2 + self.ee_width//2)):
+            collision_map[i:i+1] = 0
+            # print("ee - {}".format(i))
+            if i == (self.ee_length//2 - 1) or i == self.ee_length//2:
+                f_start = int((self.ee_length-1)//2 - (inter_finger_dist/2)) # 2
+                f_end = int((self.ee_length)//2 + (inter_finger_dist/2)) # 11
+                collision_map[i, f_start] = -1*self.finger_height # 2 # self.max_penetration_len # or use self.finger_height, if full penetration is allowed
+                collision_map[i, f_end] = -1*self.finger_height # 14 # self.max_penetration_len
+                collision_map[i, (f_start+1):f_end] = -1*self.max_penetration_len # (not allowing any object to penetrate more than 4 cm towards the EE, between the fingers)
+                # print("finger - {}".format(i))
+            
+        print("Final collision map:\n{}".format(collision_map))
+        return collision_map
+
+    def get_gripper_standard_collision_map_5mm_resolution(self):
+        '''Gets the gripper collision map that can be used to evaluate collisions at different points. 
+        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
+        the length of the table)
+        The resolution of the map -> 1 pixel occupies 0.5cm*0.5cm square box in the real world
+        '''
+        collision_map = np.full(shape=(self.ee_length*2, self.ee_length*2), fill_value=10) 
+        for i in range(int(2*self.ee_length//2 - 2*self.ee_width//2), int(2*self.ee_length//2 + 2*self.ee_width//2)):
+            collision_map[i:i+1] = 0
+            print("ee - {}".format(i))
+            # print(range((2*self.ee_length//2 - 2),  2*self.ee_length//2+2))
+            if i in range((2*self.ee_length//2 - 2),  2*self.ee_length//2+2):
+                collision_map[i, 4:6] = -1*self.finger_height# self.max_penetration_len # or use self.finger_height, if full penetration is allowed
+                collision_map[i, 22:24] = -1*self.finger_height # self.max_penetration_len
+                print("finger - {}".format(i))
+            
+        print("Final collision map:\n{}".format(collision_map))
+        return collision_map
+
+    def get_grip_validation_map_1cm_res(self, inter_finger_dist=8):
+        '''Generates grip validation map with 1cm resolution (1 pixel == 1cm*1cm area)
+        The produced map is for the gripper in its canonical/standard pose (it's length parellel to 
+        the length of the table)
+        Used for grasp validation 
+        Size = 14*14 (general)
+
+        Parameters:
+        inter_finger_dist = distance between the fingers in cm (default: max dist = 8cm)
+        '''
+        v_map = np.full(shape=(self.ee_length, self.ee_length), fill_value=10) 
+        for i in range(int(self.ee_length//2 - self.ee_width//2), int(self.ee_length//2 + self.ee_width//2)):
+            # print("ee - {}".format(i))
+            if i == (self.ee_length//2 - 1) or i == self.ee_length//2:
+                f_start = int((self.ee_length-1)//2 - (inter_finger_dist/2)) # 2
+                f_end = int((self.ee_length)//2 + (inter_finger_dist/2)) # 11
+                print("fstart: {}|2     f_end: {}|11".format(f_start, f_end))
+                v_map[i:i+1, (f_start+1):f_end] = 0
+            
+        print("Final validation map:\n{}".format(v_map))
+        return v_map
+
+
+    def rotate_kernel_map(self, kernel_map, angle):
+        '''Converts the given map into an image and rotates it by the given angle
+        Parameters:
+        kernel_map = np.ndarray (2D array)
+        angle: in degrees
+        '''
+        # modified_k_map = kernel_map + 10
+        # print("Modified map: {}".format(modified_k_map))
+        print("Kernel map: {}".format(abs(kernel_map+self.finger_height)))
+        k_img = PIL_image.fromarray(np.uint8(kernel_map+self.finger_height)) # Converts all negative elements to +ve (will be reversed later)
+        r_img = k_img.rotate(angle=angle, fillcolor=10+self.finger_height) # Angle in degrees
+        rk_map = np.array(r_img, dtype=float) 
+        print("Rotated kernel: {}".format(rk_map-self.finger_height))
+        
+        # cv2.imshow("Kernel image", np.uint8((kernel_map)*15))
+        # cv2.waitKey(0)
+
+        # cv2.imshow("Rotated image", np.uint8((rk_map-self.finger_height)*15))
+        # cv2.waitKey(0)
+        cv2.imwrite("/root/Rotated gripper.png", np.uint8((rk_map-self.finger_height)*15))
+        # k_img.show()
+        # sleep(10)
+        # r_img.show()
+        # sleep(30)
+        return rk_map-self.finger_height
+
+    def rotate_v_map(self, kernel_map, angle):
+        '''Converts the given map into an image and rotates it by the given angle
+        Parameters:
+        kernel_map = np.ndarray (2D array)
+        angle: in degrees
+        '''
+        # modified_k_map = kernel_map + 10
+        # print("Modified map: {}".format(modified_k_map))
+        print("Valid map: {}".format(abs(kernel_map+self.finger_height)))
+        k_img = PIL_image.fromarray(np.uint8(kernel_map+self.finger_height)) # Converts all negative elements to +ve (will be reversed later)
+        r_img = k_img.rotate(angle=angle, fillcolor=10+self.finger_height) # Angle in degrees
+        rk_map = np.array(r_img, dtype=float) 
+        print("Rotated Valid: {}".format(rk_map-self.finger_height))
+        
+        # cv2.imshow("Valid image", np.uint8((kernel_map)*15))
+        # cv2.waitKey(0)
+
+        # cv2.imshow("Rotated Valid image", np.uint8((rk_map-self.finger_height)*15))
+        # cv2.waitKey(0)
+        cv2.imwrite("/root/Rotated valid map.png", np.uint8((rk_map-self.finger_height)*15))
+        return rk_map-self.finger_height
+
+    def generate_random_h_map_1cm_res(self):
+        '''Generates a height map (random) of size (20*20) with resolution of 1cm
+        '''
+        h_map = np.zeros(shape=(20, 20), dtype=float)
+
+        h_map[3:10] = 6
+
+        print("Height map (random): {}".format(h_map))
+        return h_map
+
+    def return_collision_and_valid_maps(self, scene_hmap, gripper_map, v_map, grasp_height):
+        '''Checks for collisions between scene and gripper and returns a map, with 1s placed at 
+        collision free areas, and 0s placed in all the other places
+        scene_hmap: 20*20
+        gripper_map: 14*14 map
+        '''
+        n_r, n_c = scene_hmap.shape
+        g_nr, g_nc = gripper_map.shape
+        collision_map = np.zeros(shape=(n_r, n_c))
+        valid_map = np.zeros(shape=(n_r, n_c))
+
+        valid_pts = []
+
+        for i in range(0, n_r - g_nr):
+            for j in range(0, n_c - g_nc):
+                sub_map = scene_hmap[i:i+g_nr, j:j+g_nc]
+                print("Sub map shape: {}".format(sub_map.shape))
+                # Collision checking
+                if np.any(gripper_map + grasp_height - sub_map<0): # Collision detected
+                    collision_map[i+int(g_nr/2), j+int(g_nc/2)] = 0
+                else: # No collision
+                    collision_map[i+int(g_nr/2), j+int(g_nc/2)] = 1
+                    if np.min(v_map+grasp_height-self.finger_height - sub_map) < -1:# Valid grasp pose
+                        valid_map[i+int(g_nr/2), j+int(g_nc/2)] = np.max(-1*(v_map+grasp_height-self.finger_height - sub_map))# 1
+                        valid_pts.append([i+g_nr/2, j+g_nc/2])
+    
+        return collision_map, valid_map, valid_pts
+
+    def pcd_to_height_map_1cm_res(self, pcd, target_pos, x_range=0.30, y_range=0.30):
+        '''Cuts a 30cm*30cm boundary around target pos in the given pcd and converts it into a height map
+        This gives an effective search space of size - 17cm*17cm (Assuming the kernel map to be of size 
+        14cm * 14cm)
+        Height map resolution: 1cm (1 pixel == 1cm*1cm)
+        Parameters
+        pcd: pcd.points (np.array) (point cloud of the scene)
+        target_pos: [x, y, z]: list (target grasp pose)
+        Returns:
+        (height_map, (height_map_origin_coords_world_frame)) - 
+        '''
+        # For resolution of 1cm*1cm, multiply pcd by 100
+        pcd_m = (np.round(pcd * 100))
+        pcd_m[:, 2] = pcd[:, 2] # Only x and y coordinates are scaled up to represent pixels. Z values retain their meaning (value in cm)
+        x_minmax = [target_pos[0] - (x_range/2), target_pos[0]+(x_range/2 - 0.01)]*100
+        y_minmax = [target_pos[1] - (y_range/2), target_pos[1]+(y_range/2 - 0.01)]*100
+        # x_range = 0.6
+        # y_range = 1.2
+
+        pixel_maxes = np.zeros(shape=(int(x_range*100), int(y_range*100)), dtype=float)
+
+        for point in pcd:
+            # print(point)
+            if point[0] >= x_minmax[0] and point[0] <= x_minmax[1] and point[1] >= y_minmax[0] and point[1] <= y_minmax[1]:
+                # Valid point
+                # print("Yes")
+                pixel_coord = [int(100*(point[0] - x_minmax[0])), int(100*(point[1] - y_minmax[0]))]
+                print(point, pixel_coord)
+                if pixel_maxes[pixel_coord[0], pixel_coord[1]] < point[2]:
+                    # print("Yes")
+                    pixel_maxes[pixel_coord[0], pixel_coord[1]] = point[2]
+        
+        # cv2.imshow("Scene hmap", np.uint8(pixel_maxes*255/np.max(pixel_maxes)))
+        # cv2.waitKey(0)
+        cv2.imwrite("/root/scene hmap.png", np.uint8(pixel_maxes*255/np.max(pixel_maxes)))
+
+        return pixel_maxes
+
+# Miscellineous functions class - contains functions from https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py 
+# As open3d_plus import failed (due to unknown reasons - TO BE FIXED)
+class MiscFunctions:
+    '''
+    Open3d_plus library functions taken from - https://github.com/GouMinghao/open3d_plus/blob/main/open3d_plus/geometry.py
+    Due to open3d_plus import failure
+    '''
+    def __init__(self):
+        pass
+    
+    def array2pcd(self, points, colors):
+        """
+        Convert points and colors into open3d point cloud.
+        Args:
+            points(np.array): coordinates of the points.
+            colors(np.array): RGB values of the points.
+        Returns:
+            open3d.geometry.PointCloud: the point cloud.
+        """
+        pcd = o3d.geometry.PointCloud()
+        pcd.points = o3d.utility.Vector3dVector(points)
+        pcd.colors = o3d.utility.Vector3dVector(colors)
+        return pcd
+
+    def pcd2array(self, pcd):
+        """
+        Convert open3d point cloud into points and colors.
+        Args:
+            pcd(open3d.geometry.PointCloud): the point cloud.
+        Returns:
+            np.array, np.array: coordinates of the points, RGB values of the points.
+        """
+        points = np.asarray(pcd.points)
+        colors = np.asarray(pcd.colors)
+        return points, colors
 
 class MotionPlanner(object):
     def __init__(self):
@@ -93,6 +348,58 @@ class MotionPlanner(object):
 
         ee_transform = self._transformer.lookup_ros_transform("panda_ee_link", "panda_link8")
         self._ee_transform_matrix = self._transformer.ros_transform_to_matrix4x4(ee_transform.transform)
+
+        # For grasp refinement
+        self.grasp_refine_class = GraspModification()
+
+        # Setting up camera interfaces
+        self.arm_topic= 'arm_controller/command'
+        self.color_info_topic_name= '/realsense/color/camera_info'
+        self.color_topic_name= '/realsense/color/image_raw'
+        self.depth_topic_name= '/realsense/aligned_depth_to_color/image_raw'
+        self.points_topic_name= '/realsense/depth/points'
+        self.kinect_color_topic_name= '/kinect/color/image_rect_color'
+        self.kinect_depth_topic_name= '/kinect/depth_to_color/image_raw'
+        self.kinect_points_topic_name= '/kinect/depth/points'
+        self.transform_from_frame= 'world'
+        
+        # self.arm_controller = ArmController(topic = self.config['arm_topic'])
+        self.camera_interface = CameraInterface()
+        self.transform_interface = TransformInterface()
+        # Subscribing to realsense and setting it up (camera attached to arm's end effector link)
+        self.camera_interface.subscribe_topic(self.color_info_topic_name, CameraInfo)
+        self.camera_interface.subscribe_topic(self.color_topic_name, Image)
+        self.camera_interface.subscribe_topic(self.points_topic_name, PointCloud2)
+        time.sleep(2)
+        self.color_transform_to_frame = self.get_color_image_frame_id()
+        self.points_transform_to_frame = self.get_points_frame_id()
+        
+        # Subscribing to kinect and setting it up (external camera)
+        self.camera_interface.subscribe_topic(self.kinect_color_topic_name, Image)
+        self.camera_interface.subscribe_topic(self.kinect_points_topic_name, PointCloud2)
+        time.sleep(2)
+        self.kinect_color_transform_to_frame = self.get_kinect_color_image_frame_id()
+        self.kinect_points_transform_to_frame = self.get_kinect_points_frame_id()
+
+        self.o3dp = MiscFunctions()
+        
+        # Reconstruction config
+        self.reconstruction_config = {
+            'x_min': -0.20,
+            'y_min': -0.6,
+            'z_min': 0.0, # z_min: -0.05
+            'x_max': 0.3,
+            'y_max': 0.6,
+            'z_max': 0.4,
+            'nb_neighbors': 50,
+            'std_ratio': 2.0,
+            'voxel_size': 0.0015,
+            'icp_max_try': 5,
+            'icp_max_iter': 2000,
+            'translation_thresh': 3.95,
+            'rotation_thresh': 0.02,
+            'max_correspondence_distance': 0.02
+        }
 
         self.to_home_pose()
         # self.test()
@@ -413,6 +720,39 @@ class MotionPlanner(object):
                 success = self.gripper_width_test()
                 if success == False:
                     return False
+
+            if i==2 and last_gripper_action=='place': # At pre-pick pose, with the next pose being the pick pose
+                pcd = self.get_point_cloud_from_realsense(debug=True)
+                scene_hmap = self.grasp_refine_class.pcd_to_height_map_1cm_res(np.asarray(pcd.points), target_pos=[point.position.x, point.position.y, point.position.z], x_range=0.16, y_range=0.16)
+                pose_found = False
+                for i in range(2, 9, 2):
+                    # Check if the current yaw is valid or not
+                    gripper_map = self.grasp_refine_class.get_gripper_standard_collision_map_1cm_resolution(inter_finger_dist=i)
+                    r_gmap = self.grasp_refine_class.rotate_kernel_map(gripper_map, np.rad2deg(yaw))
+                    v_map = self.grasp_refine_class.get_grip_validation_map_1cm_res()
+                    r_vmap = self.grasp_refine_class.rotate_v_map(v_map, np.rad2deg(yaw))
+                    print("Grasp height: {}".format(point.position.z*100))
+                    collision_map, valid_map, valid_pts = self.grasp_refine_class.return_collision_and_valid_maps(scene_hmap=scene_hmap, gripper_map=r_gmap, v_map=r_vmap, grasp_height=point.position.z*100) # grasp height in cm
+
+                    # cv2.imshow("Collision_map", np.uint8(collision_map*255))
+                    # cv2.waitKey(0)
+                    cv2.imwrite("/root/collisionmap.png", np.uint8(collision_map*255))
+                    print("Final collision map: {}", format(collision_map))
+                    print("Max valid: {}".format(np.max(valid_map)))
+                    print("Validation map final : {}".format(valid_map))
+                    # cv2.imshow("Valid_map", np.uint8((valid_map/max(0.001, np.max(valid_map)))*255))
+                    # cv2.waitKey(0)
+                    cv2.imwrite("/root/validmap.png", np.uint8((valid_map/max(0.001, np.max(valid_map)))*255))
+
+                    if len(valid_pts)>0:
+                        print("Valid grasp pose found: {}".format(valid_pts))
+                        pose_found = True
+                    else:
+                        print("No valid grasp pose")
+                
+                    if pose_found==True:
+                        break
+                print("POse found: {}".format(pose_found))
                 
             fraction = 0
             attempts = 0
@@ -781,6 +1121,143 @@ class MotionPlanner(object):
         link8_goal = self._transformer.matrix4x4_to_ros_pose(link8_goal_matrix)
         return link8_goal
 
+    def get_color_image(self): # newly added
+        return self.camera_interface.get_numpy_image_with_encoding(self.color_topic_name)[0]
+
+    def get_color_camK(self): # newly added
+        d = self.camera_interface.get_dict_camera_info(self.color_info_topic_name)
+        return (np.array(d['K']).reshape((3,3)))
+
+    def get_depth_image(self): # newly added
+        return self.camera_interface.get_numpy_image_with_encoding(self.depth_topic_name)[0]
+
+    def get_pcd(self, use_graspnet_camera_frame = False): # newly added
+        pcd = self.camera_interface.get_o3d_pcd(self.points_topic_name)
+        return pcd
+
+    def get_color_transform_matrix(self): # newly added 
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.color_transform_to_frame)
+
+    def get_points_transform_matrix(self): # newly added
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.points_transform_to_frame)
+        
+    def get_color_image_frame_id(self):
+        '''Realsense topic'''
+        return self.camera_interface.get_ros_image(self.color_topic_name).header.frame_id
+    
+    def get_points_frame_id(self):
+        '''Realsense topic'''
+        return self.camera_interface.get_ros_points(self.points_topic_name).header.frame_id
+    
+    def get_kinect_color_image_frame_id(self):
+        '''Kinect camera'''
+        return self.camera_interface.get_ros_image(self.kinect_color_topic_name).header.frame_id
+
+    def get_kinect_depth_image_frame_id(self):
+        '''Kinect camera'''
+        return self.camera_interface.get_ros_image(self.kinect_depth_topic_name).header.frame_id
+
+    def get_kinect_points_frame_id(self):
+        '''Kinect camera'''
+        return self.camera_interface.get_ros_points(self.kinect_points_topic_name).header.frame_id
+    
+    def get_kinect_points_transform_matrix(self):
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.kinect_points_transform_to_frame)
+    
+    def get_kinect_color_transform_matrix(self):
+        return self.transform_interface.lookup_numpy_transform(self.transform_from_frame, self.kinect_color_transform_to_frame)
+    
+    def kinect_get_pcd(self, use_graspnet_camera_frame = False):
+        return self.camera_interface.get_o3d_pcd(self.kinect_points_topic_name)
+    
+    def kinect_process_pcd(self, pcd, reconstruction_config):
+        points, colors = self.o3dp.pcd2array(pcd)
+        mask = points[:, 2] > reconstruction_config['z_min']
+        mask = mask & (points[:, 2] < reconstruction_config['z_max'])
+        mask = mask & (points[:, 0] > reconstruction_config['x_min'])
+        mask = mask & (points[:, 0] < reconstruction_config['x_max'])
+        mask = mask & (points[:, 1] < reconstruction_config['y_max'])
+        mask = mask & (points[:, 1] > reconstruction_config['y_min'])
+        pcd = self.o3dp.array2pcd(points[mask], colors[mask])
+        return pcd.voxel_down_sample(reconstruction_config['voxel_size'])
+    
+    def capture_pcd(self, use_camera='kinect', debug=False):
+        t1 = time.time()
+        pcd = None
+        color_images = []
+        camera_poses = []
+        # capture images by realsense. The camera will be moved to different locations.
+        if use_camera == 'kinect': # in ['kinect', 'both']:
+            points_trans_matrix = self.get_kinect_points_transform_matrix()
+            full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
+            full_pcd_kinect.transform(points_trans_matrix)
+            full_pcd_kinect = self.kinect_process_pcd(full_pcd_kinect, self.reconstruction_config)
+                # pcds.append(full_pcd_kinect)
+                # kinect_image = self.get_kinect_image()
+                # kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGBA2RGB)
+                # kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR)
+                # if self.debug_kinect:
+                #     cv2.imshow('color', cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR))
+                #     cv2.waitKey(0)
+                #     cv2.destroyAllWindows()
+                # color_images.append(kinect_image)
+
+                # if self.debug:
+                #     print('points_trans_matrix:', points_trans_matrix)
+                # camera_poses.append(self.get_kinect_color_transform_matrix())
+            # return full_pcd_kinect
+            pcd = full_pcd_kinect
+        elif use_camera == 'realsense':
+            print("Using real sense to get the image;( ******++++++++++++***********")
+            color_image = self.get_color_image()
+            color_image = cv2.cvtColor(color_image, cv2.COLOR_RGBA2RGB)
+            if debug:
+                cv2.imshow('color', cv2.cvtColor(color_image, cv2.COLOR_RGB2BGR))
+                cv2.waitKey(0)
+                cv2.destroyAllWindows()
+            color_images.append(color_image)
+
+            points_trans_matrix = self.get_points_transform_matrix()
+            if debug:
+                print('points_trans_matrix:', points_trans_matrix)
+            camera_poses.append(self.get_color_transform_matrix())
+            pcd = self.get_pcd(use_graspnet_camera_frame = False)
+            pcd.transform(points_trans_matrix)
+            pcd = self.kinect_process_pcd(pcd, self.reconstruction_config)
+            if debug:
+                frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+                o3d.visualization.draw_geometries([pcd, frame])
+
+            pcd = pcd        
+            # return pcd
+            # pcds.append(pcd)
+        pcd.estimate_normals()
+        pcd, _ = pcd.remove_statistical_outlier(
+            nb_neighbors = self.reconstruction_config['nb_neighbors'], # self.nb_neighbors_config=10 # ,
+            std_ratio = self.reconstruction_config['std_ratio'] # self.std_ratio_config = 0.5 # reconstruction_config['std_ratio']
+        )
+
+        return pcd
+        
+    def get_point_cloud_from_kinect(self, debug=False):
+        '''
+        Capture and get point cloud from Kinect camera (Will be used to build occupancy map)
+        '''
+        pcd_kinect = self.capture_pcd(use_camera='kinect')
+        if debug==True:
+            # import open3d as o3d
+            o3d.visualization.draw_geometries([pcd_kinect])
+        return pcd_kinect
+
+    def get_point_cloud_from_realsense(self, debug=False):
+        '''
+        Capture and get point cloud from RealSense camera (will be used to build height maps for grasp checking and refinement)
+        '''
+        pcd_realsense = self.capture_pcd(use_camera='realsense')
+        if debug==True:
+            o3d.visualization.draw_geometries([pcd_realsense])
+        return pcd_realsense
+
 # motion planning test function
 def main():
     moveit_commander.roscpp_initialize(sys.argv)
@@ -871,6 +1348,7 @@ def main():
 
     moveit_commander.roscpp_shutdown()
     moveit_commander.os._exit(0)
+    
 
 
 if __name__ == '__main__':
