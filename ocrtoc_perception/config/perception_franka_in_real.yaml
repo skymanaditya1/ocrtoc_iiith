@@ -88,4 +88,4 @@ response:
     mask_thresh: 0.5
 
 debug: False
-debug_pointcloud: False
+debug_pointcloud: True

@@ -171,14 +171,14 @@ class TaskPlanner(object):
                 cartesian_dist_thresh = 0.05
                 quaternion_dist_thresh = 0.001
                 print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
-                if 'clear_box' not in result.object_name:
-                    if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
-                        # del self._completed_objects[result.object_name]
-                        continue
-                else:
-                    if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
-                        # del self._completed_objects[result.object_name]
-                        continue
+                # if 'clear_box' not in result.object_name:
+                #     if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
+                #         # del self._completed_objects[result.object_name]
+                #         continue
+                # else:
+                #     if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
+                #         # del self._completed_objects[result.object_name]
+                #         continue
                 
                 # rrc: Object pose and goal pose comparison ends here
                 
@@ -325,8 +325,8 @@ class TaskPlanner(object):
                               
         for label, poses in zip(block_labels, goal_poses):
             
-            if self.search_strings2(label, ['clear_box']): #, 'book', 'round_plate', 'plate_holder']):
-                continue
+            # if self.search_strings2(label, ['clear_box']): #, 'book', 'round_plate', 'plate_holder']):
+            #     continue
                        
             print("Poses: {}".format(poses))
             print("Poses type: {}".format(type(poses)))

@@ -431,6 +431,7 @@ class MotionPlanner(object):
         # group_goal = pose_goal
 
         points_to_target = self.get_points_to_target_upright(group_goal)
+        # points_to_target = self.get_points_to_target2(group_goal)
         
         print("points to target")
         print(points_to_target)

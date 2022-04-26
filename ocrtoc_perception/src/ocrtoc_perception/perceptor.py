@@ -159,6 +159,9 @@ class Perceptor():
             delimiter = ','
         )
 
+
+        self.mesh_folder = "/root/ocrtoc_ws/src/ocrtoc_materials/models"
+
     def get_color_image(self):
         return self.camera_interface.get_numpy_image_with_encoding(self.color_topic_name)[0]
     
@@ -552,6 +555,160 @@ class Perceptor():
 
         return x, y, z
     
+    # def get_bounding_box(self, object_name, object_pose):
+        
+        
+    #     mesh_name = object_name.rsplit('_', 1)[0]
+    #     folder_path = self.mesh_folder
+    #     mesh_file = os.path.join(folder_path, 'textured.obj')
+    #     object_pose = object_pose
+        
+    #     pcd = o3d.io.read_triangle_mesh(mesh_file)
+    #     def pcd_rotate_setup(pcd, rotation):
+        
+        
+    #         roll = rotation[0] / 360. * (2*np.pi)
+    #         pitch = rotation[1] / 360. * (2*np.pi)
+    #         yaw = (rotation[2] / 360.) * (2*np.pi)
+    #         # print(roll, pitch, yaw)
+    #         R = pcd.get_rotation_matrix_from_xyz((roll, pitch, yaw))
+    #         # print(R)
+    #         pcd_r = pcd.rotate(R, center=(0, 0, 0))
+    #         return pcd 
+
+        
+    #     x  = object_pose['pose'][0, 3]
+    #     y = object_pose['pose'][1, 3]
+    #     z = object_pose['pose'][2, 3]
+    #     translation = [x, y, z]
+        
+    #     quaternion = 
+        
+        
+    #     rotation = [1,2,3,4]
+    #     pcd_t = pcd.translate((translation[0], translation[1], translation[2]))
+
+    #     c = pcd_t.get_axis_aligned_bounding_box()
+    #     d = c.get_box_points()
+    #     e = np.asarray(d)
+        
+        
+        
+    
+    # def assign_grasp_pose3(self, gg, object_poses):
+    #     grasp_poses = dict()
+        
+    #     dist_thresh = self.config['response']['dist_thresh']
+    #     object_names = []
+        
+    #     ts = gg.translations
+    #     scores = gg.scores
+    #     print("here are the scores for all the grasps, now decide for yourself.")
+    #     print(scores)
+    #     # assert False
+
+    #     depths = gg.depths
+    #     rs = gg.rotation_matrices
+        
+    #     ts = ts + rs[:,:,0] * (np.vstack((depths, depths, depths)).T)
+    #     eelink_rs = np.zeros(shape = (len(rs), 3, 3), dtype = np.float32)
+        
+    #     eelink_rs[:,:,0] = rs[:,:,2]
+    #     eelink_rs[:,:,1] = -rs[:,:,1]
+    #     eelink_rs[:,:,2] = rs[:,:,0]
+        
+    #     min_object_ids = dict()
+        
+    #     for i, object_name in enumerate(object_poses.keys()):
+    #         object_names.append(object_name)
+    #         object_pose = object_poses[object_name]
+            
+    #         dists = np.linalg.norm(ts - object_pose['pose'][:3, 3], axis = 1)
+
+    #         print("ts shape", ts.shape)
+    #         print("object_pose['pose'][:3, 3]", object_pose['pose'][:3, 3].shape)
+    #         print(ts)
+
+    #         # assert False
+            
+    #         # object_mask = ts[:, 2] < 0.2
+            
+    #         object_mask = np.logical_and(dists < dist_thresh, ts[:, 2] < 0.2)
+            
+    #         print('here is the gg[object_mask]: {}'.format(gg[object_mask]))
+            
+    #         min_object_ids[i] = object_mask
+            
+    #     remain_gg = [] 
+        
+    #     for i, object_name in enumerate(object_poses.keys()):
+    #         # initially, we only pick the grasp poses that is assigned 
+    #         # to the current object id (i)
+            
+    #         object_pose = object_poses[object_name]
+            
+            
+    #         points_bb = self.get_bounding_box(object_name, object_pose)
+            
+            
+            
+            
+    #         object_mask = min_object_ids[i]
+            
+    #         if np.sum(object_mask) == 0:
+    #             grasp_poses[object_name] = None
+    #             continue
+            
+    #         i_gg = gg[object_mask]
+    #         i_scores = scores[object_mask]
+    #         i_ts = ts[object_mask]
+    #         i_eelink_rs = eelink_rs[object_mask]
+            
+    #         # next, we only pick the grasp poses sorted according to 
+    #         # the confidence threshold. We only pick the top n poses.
+            
+    #         n = 10000
+            
+           
+            
+    #         top_indices = (-i_scores).argsort()[:n]
+    #         top_i_gg = i_gg[top_indices]
+    #         top_i_eelink_rs = i_eelink_rs[top_indices]
+    #         top_i_ts = i_ts[top_indices]
+            
+    #         top_i_euler = np.array([self.rotationMatrixToEulerAngles(r) for r in top_i_eelink_rs])
+    #         print('Top Eulers shape', top_i_euler.shape)
+            
+            
+    #         dists = np.linalg.norm(top_i_ts - object_pose['pose'][:3, 3], axis = 1)
+            
+    #         print('Here is the dists:', dists)
+            
+    #         smallest_index = np.argmin(dists)
+            
+    #         best_gg = top_i_gg[int(smallest_index)]
+            
+    #         remain_gg.append(best_gg.to_open3d_geometry())
+            
+    #         grasp_rotation_matrix = top_i_eelink_rs[smallest_index]
+    #         gqw, gqx, gqy, gqz = mat2quat(grasp_rotation_matrix)
+            
+    #         # gqx, gqy, gqz, gqw = [ 0.0005629, -0.706825, 0.707388, 0.0005633 ]
+                        
+    #         grasp_poses[object_name] = {
+    #             'x': top_i_ts[smallest_index][0],
+    #             'y': top_i_ts[smallest_index][1],
+    #             'z': top_i_ts[smallest_index][2],
+    #             'qw': gqw,
+    #             'qx': gqx,
+    #             'qy': gqy,
+    #             'qz': gqz
+    #         }
+    
+    #     return grasp_poses, remain_gg
+    
+    
+    
     def assign_grasp_pose2(self, gg, object_poses):
         grasp_poses = dict()
         
@@ -855,6 +1012,7 @@ class Perceptor():
             pose_method = pose_method,
             object_list = object_list
         )
+
 
         # Assign the Best Grasp Pose on Each Object
         grasp_poses, remain_gg = self.assign_grasp_pose2(gg, object_poses)
