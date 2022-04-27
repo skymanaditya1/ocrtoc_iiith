@@ -183,19 +183,26 @@ class TaskPlanner(object):
                     if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
                         # del self._completed_objects[result.object_name]
                         continue
+                
                 else:
-                    
-                    if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2) or tray_count>1:  
-                        # del self._completed_objects[result.object_name]
-                        
+                    if((np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2) and tray_count < 2):
                         print("Clear tray")
                         print(init_cart_coords[1], final_cart_coords[1])
                         
                         result.is_graspable = False
-                        
-                                               
-                        continue
-                
+                    
+                    elif tray_count>1:  
+                            print(self.left_object_labels)
+                            
+                            remove_indexes = [i for i, j in enumerate(self.left_object_labels) if 'clear_box' in j]
+                            print("remove indices",remove_indexes)
+                            
+                            self.left_object_labels = [i for j, i in enumerate(self.left_object_labels) if j not in remove_indexes]
+                            print("self.left_object_labels", self.left_object_labels)
+                            # del self.left_object_labels[result.object_name]
+                                                
+                            continue
+                print("print(self.left_object_labels)", self.left_object_labels)
                 # rrc: Object pose and goal pose comparison ends here
                 
                 if result.is_graspable:

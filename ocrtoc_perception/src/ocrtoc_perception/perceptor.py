@@ -1104,7 +1104,6 @@ class Perceptor():
             mesh_file = os.path.join(folder_path, 'visual.ply')
             object_pose = object_pose
         
-       
             pcd_mesh = o3d.io.read_point_cloud(mesh_file)
         
             pcd_mesh = self.pcd_rotate_translate_setup(pcd_mesh, object_pose)
@@ -1143,9 +1142,6 @@ class Perceptor():
         full_pcd, color_images, camera_poses = self.capture_data()
         
 
-             
-        
-
         # Computer Object 6d Poses
         print("Object list in perceptor: {}".format(object_list))
         object_poses = self.compute_6d_pose(
@@ -1155,8 +1151,6 @@ class Perceptor():
             pose_method = pose_method,
             object_list = object_list
         )
-
-
         # self.pcd = full_pcd
         # full_pcd = self.icp_finer(full_pcd, object_poses )
         
@@ -1171,7 +1165,6 @@ class Perceptor():
             frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             # frame_grasp_pose.transform(t)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
-
 
         # Assign the Best Grasp Pose on Each Object
         grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
