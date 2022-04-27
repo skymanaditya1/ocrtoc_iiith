@@ -146,9 +146,17 @@ class TaskPlanner(object):
         rospy.loginfo(str(len(perception_result.perception_result_list)) + ' objects are graspable:')
         rospy.loginfo('Graspable objects information: ')
         
-               
+        tray_count = 0       
 
         for result in perception_result.perception_result_list:
+            if 'clear_box' in result.object_name:
+                    #can't handle 2 trays as the intial object poses are getting interchanged between the 2 trays. 
+                    tray_count = tray_count + 1  
+                    
+
+        for result in perception_result.perception_result_list:
+                       
+            
             if result.be_recognized: 
                 def get_rotation (quat):
                         orientation_q = quat.orientation
@@ -171,14 +179,22 @@ class TaskPlanner(object):
                 cartesian_dist_thresh = 0.05
                 quaternion_dist_thresh = 0.001
                 print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
-                # if 'clear_box' not in result.object_name:
-                #     if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
-                #         # del self._completed_objects[result.object_name]
-                #         continue
-                # else:
-                #     if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
-                #         # del self._completed_objects[result.object_name]
-                #         continue
+                if 'clear_box' not in result.object_name:
+                    if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
+                        # del self._completed_objects[result.object_name]
+                        continue
+                else:
+                    
+                    if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2) or tray_count>1:  
+                        # del self._completed_objects[result.object_name]
+                        
+                        print("Clear tray")
+                        print(init_cart_coords[1], final_cart_coords[1])
+                        
+                        result.is_graspable = False
+                        
+                                               
+                        continue
                 
                 # rrc: Object pose and goal pose comparison ends here
                 
@@ -525,18 +541,18 @@ class TaskPlanner(object):
         # exit()
 
         print("Cycle plan function started executing!")
-        left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
+        self.left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
         
         count = 0
-        while len(left_object_labels) > 0 and count <= 5:
+        while len(self.left_object_labels) > 0 and count <= 5:
             count += 1
             # 3. Get information about left objects from perception node
             
             self.detected_object_label_list = []
             
             rospy.loginfo('Try to get information of left objects from perception node')
-            self.get_pose_perception(left_object_labels)
+            self.get_pose_perception(self.left_object_labels)
             print("Detected object list: {}".format(self.detected_object_label_list))
 
             # 4. Create pick and place grasp pose lists and final list of nodes
@@ -561,7 +577,7 @@ class TaskPlanner(object):
             
             
             detected_object_list = []
-            for left_object in left_object_labels:
+            for left_object in self.left_object_labels:
                 if left_object in self.detected_object_label_list:
                     detected_object_list.append(left_object)
             
@@ -622,12 +638,12 @@ class TaskPlanner(object):
             
             # 9. Remove completed objects
             temp = []
-            for object in left_object_labels:
+            for object in self.left_object_labels:
                 if object in completed_objects:
                     continue
                 temp.append(object)
-            left_object_labels = temp
-            print("left objects: {}".format(left_object_labels))
+            self.left_object_labels = temp
+            print("left objects: {}".format(self.left_object_labels))
 
             print("************************Iteration {}***********************************************".format(count))
             

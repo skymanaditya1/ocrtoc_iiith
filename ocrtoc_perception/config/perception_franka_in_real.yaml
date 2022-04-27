@@ -83,9 +83,10 @@ graspnet:
     refine_approach_dist: 0.092
 
 response:
-    dist_thresh: 0.1
+    dist_thresh: 0.15
     angle_thresh: 20
     mask_thresh: 0.5
 
 debug: False
-debug_pointcloud: True
+debug_pointcloud: False
+debug_assigned_grasp: False

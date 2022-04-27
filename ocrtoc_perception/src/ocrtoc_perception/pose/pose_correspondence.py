@@ -206,7 +206,7 @@ def get_pose_superglue(obj_list, images, camera_poses, camera_matrix, superglue_
     # import random
     for i, (image, camera_pose) in enumerate(zip(images, camera_poses)):
         # a = random.randint(1,100)
-        if i in [2,3]:
+        if i in [3,4]:
             continue
         # cv2.imwrite('/root/ocrtoc_ws/src/test_{}.png'.format(a), image)
         # print("Image resolution: {}".format(image.shape))
