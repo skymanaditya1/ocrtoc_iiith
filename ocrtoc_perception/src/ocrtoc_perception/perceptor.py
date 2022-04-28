@@ -1056,6 +1056,23 @@ class Perceptor():
             
             
             return pcd_t
+        
+    def visualize_pcd(self, pcd_list):
+        '''
+        
+        Parameters:
+        pcd_list = [pcd1, pcd2, ...etc]
+        '''
+        vis = o3d.visualization.Visualizer()
+        vis.create_window()
+        for i, pcd in enumerate(pcd_list):
+            vis.add_geometry(pcd)
+        vis.poll_events()
+        vis.update_renderer()
+        from time import sleep
+        sleep(1)
+        vis.destroy_window()
+            
 
     
     def draw_registration_result(self, source, target, transformation):
@@ -1064,7 +1081,8 @@ class Perceptor():
         # source_temp.paint_uniform_color([1, 0.706, 0])
         # target_temp.paint_uniform_color([0, 0.651, 0.929])
         source_temp.transform(transformation)
-        o3d.visualization.draw_geometries([source_temp, target_temp]) 
+        # o3d.visualization.draw_geometries([source_temp, target_temp]) 
+        self.visualize_pcd([source_temp, target_temp])
     
     def icp_fullpcd_mesh(self, full_pcd, mesh_pcd):
         
@@ -1081,7 +1099,7 @@ class Perceptor():
                 reconstruction_config['max_correspondence_distance'],
                 np.eye(4, dtype = np.float),
                 o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=200)
+                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=500)
             )
         
         print(reg_p2p)
@@ -1168,6 +1186,49 @@ class Perceptor():
         #     o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
 
         # Computer Object 6d Poses
+        # print("Object list in perceptor: {}".format(object_list))
+        # object_poses = self.compute_6d_pose(
+        #     full_pcd = full_pcd,
+        #     color_images = color_images,
+        #     camera_poses = camera_poses,
+        #     pose_method = pose_method,
+        #     object_list = object_list
+        # )
+
+        # # full_pcd_re = self.icp_finer(full_pcd, object_poses)
+        # # print(full_pcd_re)
+        # # o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test_icp.pcd", full_pcd_re)
+        # # o3d.visualization.draw_geometries([full_pcd_re])
+        
+        # # full_pcd_contact = copy.deepcopy(full_pcd_re)
+        # gg, t = self.compute_grasp_pose(full_pcd)
+        # o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test_contact.pcd", full_pcd)
+        # pcd_file = "/root/ocrtoc_ws/src/test_contact.pcd"
+        # # pcd_contact = o3d.io.read_point_cloud(pcd_file)
+        # # print(pcd_contact)
+        # # frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+        # # frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+        # # merged_pcds = o3dp.merge_pcds([frame, pcd_contact, *gg.to_open3d_geometry_list()])
+        # # o3dp.io.write_point_cloud('/root/ocrtoc_ws/src/grasp_debug.pcd', merged_pcds)
+        # if self.debug_pointcloud:
+        #     # print('g pose from the return function {}'.format(t))
+        #     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+        #     frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+        #     # frame_grasp_pose.transform(t)
+        #     o3d.visualization.draw_geometries([frame,frame_grasp_pose])
+        #     o3d.visualization.draw_geometries([frame,frame_grasp_pose, *gg.to_open3d_geometry_list()])
+        #     o3d.visualization.draw_geometries([full_pcd])
+        #     o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
+            
+        
+        
+        
+        # # Assign the Best Grasp Pose on Each Object
+        # grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
+        # if self.debug and pose_method == 'icp':
+        #     o3d.visualization.draw_geometries([full_pcd, *remain_gg])
+        # return object_poses, grasp_poses
+
         print("Object list in perceptor: {}".format(object_list))
         object_poses = self.compute_6d_pose(
             full_pcd = full_pcd,
@@ -1176,35 +1237,39 @@ class Perceptor():
             pose_method = pose_method,
             object_list = object_list
         )
-
-        full_pcd_re = self.icp_finer(full_pcd, object_poses)
-        print(full_pcd_re)
-        o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test_icp.pcd", full_pcd_re)
-        # o3d.visualization.draw_geometries([full_pcd_re])
+        # self.pcd = full_pcd
+        # full_pcd = self.icp_finer(full_pcd, object_poses )
         
-        full_pcd_contact = copy.deepcopy(full_pcd_re)
-        gg, t = self.compute_grasp_pose(full_pcd_contact)
-        o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test_contact.pcd", full_pcd_contact)
-        pcd_file = "/root/ocrtoc_ws/src/test_contact.pcd"
-        pcd_contact = o3d.io.read_point_cloud(pcd_file)
-        print(pcd_contact)
+        # Compute Grasping Poses (Many Poses in a Scene)
+        o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
+        # pcd_vis=  copy.deepcopy(full_pcd)
+        # o3d.visualization.draw_geometries([pcd_vis])
+        gg, t = self.compute_grasp_poses3(full_pcd)
         if self.debug_pointcloud:
             # print('g pose from the return function {}'.format(t))
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             # frame_grasp_pose.transform(t)
-            o3d.visualization.draw_geometries([frame,frame_grasp_pose])
-            o3d.visualization.draw_geometries([frame,frame_grasp_pose, *gg.to_open3d_geometry_list()])
-            o3d.visualization.draw_geometries([pcd_contact])
-            o3d.visualization.draw_geometries([frame, pcd_contact, *gg.to_open3d_geometry_list(), frame_grasp_pose])
-        
-        
-        
+            o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
+
         # Assign the Best Grasp Pose on Each Object
         grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
-        if self.debug and pose_method == 'icp':
-            o3d.visualization.draw_geometries([full_pcd, *remain_gg])
+        
+        print("grasps ready")
+        # print(grasp_poses)
+        # print(remain_gg)
+        # if self.debug_grasp:
+            
+        #     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+        #     frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+           
+        #     o3d.visualization.draw_geometries([frame, full_pcd, *remain_gg.to_open3d_geometry_list(), frame_grasp_pose])
+
+            
         return object_poses, grasp_poses
+
+
+
 
     def get_response(self, object_list):
         '''
