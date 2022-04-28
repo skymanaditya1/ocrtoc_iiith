@@ -74,7 +74,7 @@ superglue:
         sinkhorn_iterations: 20
         match_threshold: 0.2
     compute_pose:
-        resize: [640, 360] # [320, 180] # [640, 360] # [1280, 720] # [640, 360]
+        resize: [640, 360] 
         device: 'cuda'
         correspondence_thresh: 10
         min_correspondence_thresh: 5

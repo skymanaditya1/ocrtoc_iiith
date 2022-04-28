@@ -8,8 +8,6 @@ import rospy
 import rospkg
 import random
 
-# import tf.transformations
-
 import math
 import open3d as o3d
 import open3d_plus as o3dp
@@ -56,7 +54,6 @@ def process_pcds(pcds, use_camera, reconstruction_config):
     trans = dict()
     start_id = reconstruction_config['{}_camera_order'.format(use_camera)][0]
     pcd = copy.deepcopy(crop_pcd(pcds, start_id, reconstruction_config))
-    print("np.asarray(pcd.points).shape[0]", np.asarray(pcd.points).shape)
     pcd.estimate_normals()
     pcd, _ = pcd.remove_statistical_outlier(
         nb_neighbors = reconstruction_config['nb_neighbors'],
@@ -66,9 +63,6 @@ def process_pcds(pcds, use_camera, reconstruction_config):
     for i in idx_list[1:]: # the order are decided by the camera pose
         voxel_size = reconstruction_config['voxel_size']
         income_pcd = copy.deepcopy(crop_pcd(pcds, i, reconstruction_config))
-        
-        
-        print("np.asarray(income_pcd.points).shape[0]", np.asarray(income_pcd.points).shape)
         
         if np.asarray(income_pcd.points).shape[0] == 0:
             continue
@@ -216,24 +210,17 @@ class Perceptor():
         pcds = []
         color_images = []
         camera_poses = []
-        # capture images by realsense. The camera will be moved to different locations.
+        # capture images by realsense + kinect. The realsense camera will be moved to different locations.
         if self.use_camera in ['kinect', 'both']:
             points_trans_matrix = self.get_kinect_points_transform_matrix()
             full_pcd_kinect = self.kinect_get_pcd(use_graspnet_camera_frame = False) # in sapien frame.
             full_pcd_kinect.transform(points_trans_matrix)
             full_pcd_kinect = kinect_process_pcd(full_pcd_kinect, self.config['reconstruction'])
             if self.use_camera == 'both':
-                
-                # print("np.asarray(full_pcd_kinect.points).shape[0]", np.asarray(full_pcd_kinect.points).shape[0])
-                                    
+                                                    
                 pcds.append(full_pcd_kinect)
                 kinect_image = self.get_kinect_image()
                 kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGBA2RGB)
-                # kinect_image = cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR)
-                # if self.debug_kinect:
-                #     cv2.imshow('color', cv2.cvtColor(kinect_image, cv2.COLOR_RGB2BGR))
-                #     cv2.waitKey(0)
-                #     cv2.destroyAllWindows()
                 color_images.append(kinect_image)
 
                 if self.debug:
@@ -249,8 +236,6 @@ class Perceptor():
                 self.arm_controller.exec_joint_goal(arm_pose)
                 rospy.sleep(2.0)
                 time.sleep(1.0)
-                # if j not in self.config['reconstruction']['both_camera_order']:
-                #     continue
                 color_image = self.get_color_image()
                 color_image = cv2.cvtColor(color_image, cv2.COLOR_RGBA2RGB)
                 if self.debug:
@@ -272,9 +257,8 @@ class Perceptor():
                       
                 pcds.append(pcd)
 
-        # capture image by kinect
-        
-        # if more than one images are used, the scene will be reconstructed by regitration.
+                
+        # if more than one images are used, the scene will be reconstructed by registration.
         if self.use_camera in ['realsense', 'both']:
             trans, full_pcd_realsense = process_pcds(pcds, use_camera = self.use_camera, reconstruction_config = self.config['reconstruction'])
 
@@ -285,7 +269,7 @@ class Perceptor():
         elif self.use_camera == 'both':
             full_pcd = full_pcd_realsense
         else:
-            raise ValueError('"use_camrera" should be "kinect", "realsense" or "both"')
+            raise ValueError('"use_camera" should be "kinect", "realsense" or "both"')
         if self.debug:
             t2 = time.time()
             rospy.loginfo('Capturing data time:{}'.format(t2 - t1))
@@ -296,7 +280,7 @@ class Perceptor():
     def compute_6d_pose(self, full_pcd, color_images, camera_poses, pose_method, object_list):
         camK = self.get_color_camK()
 
-        print('Camera Matrix:\n{}'.format(camK))
+        # print('Camera Matrix:\n{}'.format(camK))
         if pose_method == 'icp':
             if self.debug:
                 print('Using ICP to obtain 6d poses')
@@ -338,99 +322,23 @@ class Perceptor():
         return object_poses
 
     def compute_grasp_pose(self, full_pcd):
-        # return self.compute_grasp_poses2(full_pcd)
-        return self.compute_grasp_poses3(full_pcd)
-        # points, _ = o3dp.pcd2array(full_pcd)
-        # grasp_pcd = copy.deepcopy(full_pcd)
-        # grasp_pcd.points = o3d.utility.Vector3dVector(-points)
-
-        # # generating grasp poses.
-        # gg = self.graspnet_baseline.inference(grasp_pcd)
-        # gg.translations = -gg.translations
-        # gg.rotation_matrices = -gg.rotation_matrices
-        # gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
-        # gg = self.graspnet_baseline.collision_detection(gg, points)
-        
-        # print("Here are the grasp poses from the baseline {}".format(gg))
-
-        # # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
-        # return gg
-    
-    def compute_grasp_poses3(self, full_pcd):
-        '''
-        Step 1: Call the contact graspnet API to generate the grasp poses
-        '''
-        # 1. Initialize all the paths and the data.
-        random_value = random.randint(0, 10000)
-        
-        SAVE_PATH_NPZ = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('temp', random_value)
-        SAVE_PATH_COLORS = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('temp_colors', random_value)
-        GRASP_SAVE_PATH = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('grasps_temp', random_value)
         
         points, _ = o3dp.pcd2array(full_pcd)
-        full_pcd_as_np = -(points.copy())
-        full_pcd_colors_as_np = np.asarray(full_pcd.colors)*255 
-        
-        np.save(SAVE_PATH_NPZ, full_pcd_as_np)
-        np.save(SAVE_PATH_COLORS, full_pcd_colors_as_np)
-        
-        # 3. Run contact graspnet through the bash command
-        command = '/root/ocrtoc_ws/src/ocrtoc_perception/run_contact_graspnet.sh {} {} {}' \
-            .format(SAVE_PATH_NPZ, SAVE_PATH_COLORS, GRASP_SAVE_PATH)
-        
-        print('Running Contact Graspnet')
-        os.system(command)
-        
-        # 4. Load grasp poses generated by contact graspnet.
-        grasps = np.load(GRASP_SAVE_PATH, allow_pickle=True).item()
-        
-        pred_grasps_cam = grasps['pred_grasps_cam'][-1]
-        grasp_scores = grasps['grasp_scores'][-1]
-        
-        print(pred_grasps_cam.shape, grasp_scores.shape)
-        
-        '''
-        Step 2: Formatting the grasp poses into the baseline grasp pose patterns
-        '''
-        grasps = []
-        
-        g_pose = None
-        
-        # follwing width, height, and depth values are taken from baseline graspnet
-        width, height, depth = 0.07500000298023224, 0.019999999552965164, 0.019999999552965164
-        
-        for grasp_pose, grasp_score in zip(pred_grasps_cam, grasp_scores):
-            grasp = np.array([grasp_score, width, height, depth, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, -1], dtype = np.float64)
-            
-            frame = o3d.geometry.TriangleMesh.create_coordinate_frame()
-            frame.transform(grasp_pose)
-            
-            Rg = frame.get_rotation_matrix_from_zyx((0, -np.pi/2, np.pi/2))
-            
-            T = np.eye(4)
-            T[:3, :3] = Rg
-            
-            grasp_pose = grasp_pose @ T
-           
-            grasp[4:13] = grasp_pose[:3, :3].reshape(-1)
-            grasp[13:16] = grasp_pose[:3, -1].reshape(-1)
-            
-            grasps.append(grasp)
-            g_pose = grasp_pose
-            
-        grasps = np.vstack(grasps)
-        
-        print('formatted shape: {}'.format(grasps.shape))
-        
-        gg = GraspGroup(grasps)
-        
+        grasp_pcd = copy.deepcopy(full_pcd)
+        grasp_pcd.points = o3d.utility.Vector3dVector(-points)
+
+        # generating grasp poses.
+        gg = self.graspnet_baseline.inference(grasp_pcd)
         gg.translations = -gg.translations
         gg.rotation_matrices = -gg.rotation_matrices
         gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
         gg = self.graspnet_baseline.collision_detection(gg, points)
         
-        return gg, g_pose
-    
+        print("Here are the grasp poses from the baseline {}".format(gg))
+
+        # all the returned result in 'world' frame. 'gg' using 'graspnet' gripper frame.
+        return gg
+          
     def compute_grasp_poses2(self, full_pcd):
         '''
         Step 1: Call the contact graspnet API to generate the grasp poses
@@ -533,28 +441,196 @@ class Perceptor():
         
         return gg, g_pose 
     
+    def compute_grasp_poses3(self, full_pcd):
+        '''
+        Step 1: Call the contact graspnet API to generate the grasp poses
+        '''
+        # 1. Initialize all the paths and the data.
+        random_value = random.randint(0, 10000)
+        
+        SAVE_PATH_NPZ = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('temp', random_value)
+        SAVE_PATH_COLORS = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('temp_colors', random_value)
+        GRASP_SAVE_PATH = '/root/ocrtoc_ws/src/contact_graspnet/{}_{}.npy'.format('grasps_temp', random_value)
+        
+        points, _ = o3dp.pcd2array(full_pcd)
+        full_pcd_as_np = -(points.copy())
+        full_pcd_colors_as_np = np.asarray(full_pcd.colors)*255 
+        
+        np.save(SAVE_PATH_NPZ, full_pcd_as_np)
+        np.save(SAVE_PATH_COLORS, full_pcd_colors_as_np)
+        
+        # 3. Run contact graspnet through the bash command
+        command = '/root/ocrtoc_ws/src/ocrtoc_perception/run_contact_graspnet.sh {} {} {}' \
+            .format(SAVE_PATH_NPZ, SAVE_PATH_COLORS, GRASP_SAVE_PATH)
+        
+        print('Running Contact Graspnet')
+        os.system(command)
+        
+        # 4. Load grasp poses generated by contact graspnet.
+        grasps = np.load(GRASP_SAVE_PATH, allow_pickle=True).item()
+        
+        pred_grasps_cam = grasps['pred_grasps_cam'][-1]
+        grasp_scores = grasps['grasp_scores'][-1]
+        
+        # print(pred_grasps_cam.shape, grasp_scores.shape)
+        
+        '''
+        Step 2: Formatting the grasp poses into the baseline grasp pose patterns
+        '''
+        grasps = []
+        
+        g_pose = None
+        
+        # follwing width, height, and depth values are taken from baseline graspnet
+        width, height, depth = 0.07500000298023224, 0.019999999552965164, 0.019999999552965164
+        
+        for grasp_pose, grasp_score in zip(pred_grasps_cam, grasp_scores):
+            grasp = np.array([grasp_score, width, height, depth, 1, 0, 0, 0, 1, 0, 0, 0, 1, 0, 0, 0, -1], dtype = np.float64)
+            
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame()
+            frame.transform(grasp_pose)
+            
+            Rg = frame.get_rotation_matrix_from_zyx((0, -np.pi/2, np.pi/2))
+            
+            T = np.eye(4)
+            T[:3, :3] = Rg
+            
+            grasp_pose = grasp_pose @ T
+           
+            grasp[4:13] = grasp_pose[:3, :3].reshape(-1)
+            grasp[13:16] = grasp_pose[:3, -1].reshape(-1)
+            
+            grasps.append(grasp)
+            g_pose = grasp_pose
+            
+        grasps = np.vstack(grasps)
+                      
+        gg = GraspGroup(grasps)
+        
+        gg.translations = -gg.translations
+        gg.rotation_matrices = -gg.rotation_matrices
+        gg.translations = gg.translations + gg.rotation_matrices[:, :, 0] * self.config['graspnet']['refine_approach_dist']
+        gg = self.graspnet_baseline.collision_detection(gg, points)
+        
+        return gg, g_pose
     
-
-    # Calculates rotation matrix to euler angles
-    # The result is the same as MATLAB except the order
-    # of the euler angles ( x and z are swapped ).
-    def rotationMatrixToEulerAngles(self, R) :
-
-        sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
-
-        singular = sy < 1e-6
-
-        if  not singular :
-            x = math.atan2(R[2,1] , R[2,2])
-            y = math.atan2(-R[2,0], sy)
-            z = math.atan2(R[1,0], R[0,0])
-        else :
-            x = math.atan2(-R[1,2], R[1,1])
-            y = math.atan2(-R[2,0], sy)
-            z = 0
-
-        return x, y, z
     
+    def assign_grasp_pose(self, gg, object_poses):
+        save_things = {
+            'gg': gg,
+            'object_poses': object_poses
+        }
+        
+        np.save('/root/ocrtoc_ws/src/gg.npy', save_things)
+        
+        grasp_poses = dict()
+        dist_thresh = self.config['response']['dist_thresh']
+        # - dist_thresh: float of the minimum distance from the grasp pose center to the object center. The unit is millimeter.
+        angle_thresh = self.config['response']['angle_thresh']
+        # - angle_thresh:
+        #             /|
+        #            / |
+        #           /--|
+        #          /   |
+        #         /    |
+        # Angle should be smaller than this angle
+
+        object_names = []
+        # gg: GraspGroup in 'world' frame of 'graspnet' gripper frame.
+        # x is the approaching direction.
+        ts = gg.translations
+        rs = gg.rotation_matrices
+        depths = gg.depths
+        scores = gg.scores
+
+        # move the center to the eelink frame
+        ts = ts + rs[:,:,0] * (np.vstack((depths, depths, depths)).T)
+        eelink_rs = np.zeros(shape = (len(rs), 3, 3), dtype = np.float32)
+
+        # the coordinate systems are different in graspnet and ocrtoc
+        eelink_rs[:,:,0] = rs[:,:,2]
+        eelink_rs[:,:,1] = -rs[:,:,1]
+        eelink_rs[:,:,2] = rs[:,:,0]
+
+        # min_dist: np.array of the minimum distance to any object(must > dist_thresh)
+        min_dists = np.inf * np.ones((len(rs)))
+
+        # min_object_ids: np.array of the id of the nearest object.
+        min_object_ids = -1 * np.ones(shape = (len(rs)), dtype = np.int32)
+
+        # first round to find the object that each grasp belongs to.
+
+        # Pay attention that even the grasp pose may be accurate,
+        # poor 6dpose estimation result may lead to bad grasping result
+        # as this step depends on the 6d pose estimation result.
+        angle_mask = (rs[:, 2, 0] < -np.cos(angle_thresh / 180.0 * np.pi))
+        for i, object_name in enumerate(object_poses.keys()):
+            object_names.append(object_name)
+            object_pose = object_poses[object_name]
+
+            dists = np.linalg.norm(ts - object_pose['pose'][:3,3], axis=1)
+            print('distances {}'.format(dists))
+            object_mask = np.logical_and(dists < min_dists, dists < dist_thresh)
+            print('object mask {}'.format(object_mask))
+
+            min_object_ids[object_mask] = i
+            min_dists[object_mask] = dists[object_mask]
+        remain_gg = []
+        # second round to calculate the parameters
+        for i, object_name in enumerate(object_poses.keys()):
+            object_pose = object_poses[object_name]
+
+            obj_id_mask = (min_object_ids == i)
+            add_angle_mask = (obj_id_mask & angle_mask)
+            # For safety and planning difficulty reason, grasp pose with small angle with gravity direction will be accept.
+            # if no grasp pose is available within the safe cone. grasp pose with the smallest angle will be used without
+            # considering the angle.
+            if np.sum(add_angle_mask) < self.config['response']['mask_thresh']: # actually this should be mask == 0, for safety reason, < 0.5 is used.
+                mask = obj_id_mask
+                sorting_method = 'angle'
+            else:
+                mask = add_angle_mask
+                sorting_method = 'score'
+            if self.debug:
+                print(f'{object_name} using sorting method{sorting_method}, mask num:{np.sum(mask)}')
+            i_scores = scores[mask]
+            i_ts = ts[mask]
+            i_eelink_rs = eelink_rs[mask]
+            i_rs = rs[mask]
+            i_gg = gg[mask]
+            if np.sum(mask) < self.config['response']['mask_thresh']: # actually this should be mask == 0, for safety reason, < 0.5 is used.
+                # ungraspable
+                grasp_poses[object_name] = None
+            else:
+                if sorting_method == 'score':
+                    best_grasp_id = np.argmax(i_scores)
+                elif sorting_method == 'angle':
+                    best_grasp_id = np.argmin(i_rs[:, 2, 0])
+                else:
+                    raise ValueError('Unknown sorting method')
+                best_g = i_gg[int(best_grasp_id)]
+                remain_gg.append(best_g.to_open3d_geometry())
+                grasp_rotation_matrix = i_eelink_rs[best_grasp_id]
+                if np.linalg.norm(np.cross(grasp_rotation_matrix[:,0], grasp_rotation_matrix[:,1]) - grasp_rotation_matrix[:,2]) > 0.1:
+                    if self.debug:
+                        print('\033[031mLeft Hand Coordinate System Grasp!\033[0m')
+                    grasp_rotation_matrix[:,0] = - grasp_rotation_matrix[:, 0]
+                else:
+                    if self.debug:
+                        print('\033[032mRight Hand Coordinate System Grasp!\033[0m')
+                gqw, gqx, gqy, gqz = mat2quat(grasp_rotation_matrix)
+                grasp_poses[object_name] = {
+                    'x': i_ts[best_grasp_id][0],
+                    'y': i_ts[best_grasp_id][1],
+                    'z': i_ts[best_grasp_id][2],
+                    'qw': gqw,
+                    'qx': gqx,
+                    'qy': gqy,
+                    'qz': gqz
+                }
+        return grasp_poses, remain_gg
+
+        
     def assign_grasp_pose2(self, gg, object_poses):
         grasp_poses = dict()
         
@@ -691,128 +767,17 @@ class Perceptor():
     
         return grasp_poses, remain_gg
 
-    def assign_grasp_pose(self, gg, object_poses):
-        save_things = {
-            'gg': gg,
-            'object_poses': object_poses
-        }
-        
-        np.save('/root/ocrtoc_ws/src/gg.npy', save_things)
-        
-        grasp_poses = dict()
-        dist_thresh = self.config['response']['dist_thresh']
-        # - dist_thresh: float of the minimum distance from the grasp pose center to the object center. The unit is millimeter.
-        angle_thresh = self.config['response']['angle_thresh']
-        # - angle_thresh:
-        #             /|
-        #            / |
-        #           /--|
-        #          /   |
-        #         /    |
-        # Angle should be smaller than this angle
-
-        object_names = []
-        # gg: GraspGroup in 'world' frame of 'graspnet' gripper frame.
-        # x is the approaching direction.
-        ts = gg.translations
-        rs = gg.rotation_matrices
-        depths = gg.depths
-        scores = gg.scores
-
-        # move the center to the eelink frame
-        ts = ts + rs[:,:,0] * (np.vstack((depths, depths, depths)).T)
-        eelink_rs = np.zeros(shape = (len(rs), 3, 3), dtype = np.float32)
-
-        # the coordinate systems are different in graspnet and ocrtoc
-        eelink_rs[:,:,0] = rs[:,:,2]
-        eelink_rs[:,:,1] = -rs[:,:,1]
-        eelink_rs[:,:,2] = rs[:,:,0]
-
-        # min_dist: np.array of the minimum distance to any object(must > dist_thresh)
-        min_dists = np.inf * np.ones((len(rs)))
-
-        # min_object_ids: np.array of the id of the nearest object.
-        min_object_ids = -1 * np.ones(shape = (len(rs)), dtype = np.int32)
-
-        # first round to find the object that each grasp belongs to.
-
-        # Pay attention that even the grasp pose may be accurate,
-        # poor 6dpose estimation result may lead to bad grasping result
-        # as this step depends on the 6d pose estimation result.
-        angle_mask = (rs[:, 2, 0] < -np.cos(angle_thresh / 180.0 * np.pi))
-        for i, object_name in enumerate(object_poses.keys()):
-            object_names.append(object_name)
-            object_pose = object_poses[object_name]
-
-            dists = np.linalg.norm(ts - object_pose['pose'][:3,3], axis=1)
-            print('distances {}'.format(dists))
-            object_mask = np.logical_and(dists < min_dists, dists < dist_thresh)
-            print('object mask {}'.format(object_mask))
-
-            min_object_ids[object_mask] = i
-            min_dists[object_mask] = dists[object_mask]
-        remain_gg = []
-        # second round to calculate the parameters
-        for i, object_name in enumerate(object_poses.keys()):
-            object_pose = object_poses[object_name]
-
-            obj_id_mask = (min_object_ids == i)
-            add_angle_mask = (obj_id_mask & angle_mask)
-            # For safety and planning difficulty reason, grasp pose with small angle with gravity direction will be accept.
-            # if no grasp pose is available within the safe cone. grasp pose with the smallest angle will be used without
-            # considering the angle.
-            if np.sum(add_angle_mask) < self.config['response']['mask_thresh']: # actually this should be mask == 0, for safety reason, < 0.5 is used.
-                mask = obj_id_mask
-                sorting_method = 'angle'
-            else:
-                mask = add_angle_mask
-                sorting_method = 'score'
-            if self.debug:
-                print(f'{object_name} using sorting method{sorting_method}, mask num:{np.sum(mask)}')
-            i_scores = scores[mask]
-            i_ts = ts[mask]
-            i_eelink_rs = eelink_rs[mask]
-            i_rs = rs[mask]
-            i_gg = gg[mask]
-            if np.sum(mask) < self.config['response']['mask_thresh']: # actually this should be mask == 0, for safety reason, < 0.5 is used.
-                # ungraspable
-                grasp_poses[object_name] = None
-            else:
-                if sorting_method == 'score':
-                    best_grasp_id = np.argmax(i_scores)
-                elif sorting_method == 'angle':
-                    best_grasp_id = np.argmin(i_rs[:, 2, 0])
-                else:
-                    raise ValueError('Unknown sorting method')
-                best_g = i_gg[int(best_grasp_id)]
-                remain_gg.append(best_g.to_open3d_geometry())
-                grasp_rotation_matrix = i_eelink_rs[best_grasp_id]
-                if np.linalg.norm(np.cross(grasp_rotation_matrix[:,0], grasp_rotation_matrix[:,1]) - grasp_rotation_matrix[:,2]) > 0.1:
-                    if self.debug:
-                        print('\033[031mLeft Hand Coordinate System Grasp!\033[0m')
-                    grasp_rotation_matrix[:,0] = - grasp_rotation_matrix[:, 0]
-                else:
-                    if self.debug:
-                        print('\033[032mRight Hand Coordinate System Grasp!\033[0m')
-                gqw, gqx, gqy, gqz = mat2quat(grasp_rotation_matrix)
-                grasp_poses[object_name] = {
-                    'x': i_ts[best_grasp_id][0],
-                    'y': i_ts[best_grasp_id][1],
-                    'z': i_ts[best_grasp_id][2],
-                    'qw': gqw,
-                    'qx': gqx,
-                    'qy': gqy,
-                    'qz': gqz
-                }
-        return grasp_poses, remain_gg
-
     
     
-    # Calculates rotation matrix to euler angles
-    # The result is the same as MATLAB except the order
-    # of the euler angles ( x and z are swapped ).
+    
+    
     def rotationMatrixToEulerAngles(self, R) :
-
+        '''
+        Calculates rotation matrix to euler angles
+        The result is the same as MATLAB except the order
+        of the euler angles ( x and z are swapped ).
+        '''
+        
         sy = math.sqrt(R[0,0] * R[0,0] +  R[1,0] * R[1,0])
 
         singular = sy < 1e-6
@@ -830,6 +795,10 @@ class Perceptor():
     
     def get_bounding_box(self, object_name, object_pose):
         
+        '''
+        Input: mesh name + pose of the object[superglue]
+        Output: Axis aligned bounding box of meshes
+        '''
         
         mesh_name = object_name.rsplit('_', 1)[0]
         folder_path = self.mesh_folder
@@ -845,11 +814,11 @@ class Perceptor():
             pitch = rotation[1] 
             yaw = rotation[2] 
             print(object_name)
-            print("rpy", roll, pitch, yaw)
+            # print("rpy", roll, pitch, yaw)
             R = pcd.get_rotation_matrix_from_xyz((roll, pitch, yaw))
             # print(R)
             pcd_r = pcd.rotate(R, center=(0, 0, 0))
-            return pcd 
+            return pcd_r
 
         
         x = object_pose['pose'][0, 3]
@@ -877,9 +846,6 @@ class Perceptor():
         
         ts = gg.translations
         scores = gg.scores
-        # print("here are the scores for all the grasps, now decide for yourself.")
-        # print(scores)
-
         depths = gg.depths
         rs = gg.rotation_matrices
         
@@ -897,24 +863,15 @@ class Perceptor():
             object_pose = object_poses[object_name]
             
             dists = np.linalg.norm(ts - object_pose['pose'][:3, 3], axis = 1)
-
-            # print("ts shape", ts.shape)
-            # print("object_pose['pose'][:3, 3]", object_pose['pose'][:3, 3].shape)
-            # print(ts)
-
-           
-            object_mask = np.logical_and(dists < dist_thresh, ts[:, 2] < 0.2)  #why 0.2 on z?
-            
-            
-                        
+          
+            object_mask = np.logical_and(dists < dist_thresh, ts[:, 2] < 0.35) 
+                       
             min_object_ids[i] = object_mask
             
         remain_gg = [] 
         
         for i, object_name in enumerate(object_poses.keys()):
-            # initially, we only pick the grasp poses that is assigned 
-            # to the current object id (i)
-            
+                        
             object_pose = object_poses[object_name]
             
             object_mask = min_object_ids[i]
@@ -937,70 +894,40 @@ class Perceptor():
             top_i_gg = i_gg[top_indices]
             top_i_eelink_rs = i_eelink_rs[top_indices]
             top_i_ts = i_ts[top_indices]
-            
-            
+                        
             points_bb = self.get_bounding_box(object_name, object_pose)
             min_x  = np.min(points_bb[:,0])
             min_y  = np.min(points_bb[:,1])
             
             max_x  = np.max(points_bb[:,0])
             max_y  = np.max(points_bb[:,1])
-            print(object_name)
-            print(points_bb, " Points bb")
-            
+                        
             position = object_pose['pose'][:3, 3]
             
-            print("Object position", position)
-            print("Object min-max", min_x, min_y, max_x, max_y)
-            
-            # print('top_i_ts[1,:]', top_i_ts[1,:])
+                       
+            #mask to choose grasp poses that lie in the bounding box
             object_mask = (top_i_ts[:, 0] < max_x) 
             object_mask = object_mask & (top_i_ts[:, 0] > min_x)
             object_mask = object_mask & (top_i_ts[:, 1] < max_y)
             object_mask = object_mask & (top_i_ts[:, 1] > min_y)
             
-           
-            # top_indices = top_indices[object_mask]
-            print("top_i_gg", top_i_gg)
-            # print("top_i_gg shape", top_i_gg.shape)
-            top_i_gg = top_i_gg[object_mask]
-            print("After mask")
-            print("top_i_gg", top_i_gg)
             
+            top_i_gg = top_i_gg[object_mask]                      
             top_i_eelink_rs = top_i_eelink_rs[object_mask]
             top_i_ts = top_i_ts[object_mask]
-                       
-            print("top_i_ts", top_i_ts.shape)
-            
+                        
             if top_i_ts.shape[1] == 0 or top_i_ts.shape[0] == 0 :
                 print("No poses in the bbox")
                 grasp_poses[object_name] = None
                 continue
-            
-            print("test2")
-            top_i_euler = np.array([self.rotationMatrixToEulerAngles(r) for r in top_i_eelink_rs])
-            print('Top Eulers shape', top_i_euler.shape)
-            
-            
+                                 
             dists = np.linalg.norm(top_i_ts - object_pose['pose'][:3, 3], axis = 1)
-            
-            print('Here is the dists:', dists)
-            
             smallest_index = np.argmin(dists)
-            
             best_gg = top_i_gg[int(smallest_index)]
-            
-            print("best_gg", best_gg)
-            print("top_i_ts[smallest_index]", top_i_ts[smallest_index])
-            print("smallest_index", smallest_index)
-            
-            
             remain_gg.append(best_gg.to_open3d_geometry())
             
             grasp_rotation_matrix = top_i_eelink_rs[smallest_index]
             gqw, gqx, gqy, gqz = mat2quat(grasp_rotation_matrix)
-            
-            # gqx, gqy, gqz, gqw = [ 0.0005629, -0.706825, 0.707388, 0.0005633 ]
                         
             grasp_poses[object_name] = {
                 'x': top_i_ts[smallest_index][0],
@@ -1012,20 +939,15 @@ class Perceptor():
                 'qz': gqz
             }
             
-            
-            print(object_name)
-            print(grasp_poses[object_name])
             points_bb = self.get_bounding_box(object_name, object_pose)
             
             min_x  = np.min(points_bb[:,0])
             min_y  = np.min(points_bb[:,1])
-            
             max_x  = np.max(points_bb[:,0])
             max_y  = np.max(points_bb[:,1])
             
-            print("Object min-max", min_x, max_x, min_y, max_y)
-            print(object_name)
-            print(grasp_poses[object_name])
+            # print(object_name)
+            # print(grasp_poses[object_name])
     
         return grasp_poses, remain_gg
     
@@ -1037,52 +959,23 @@ class Perceptor():
             translation = [x, y, z]
             R = object_pose['pose'][:3, :3]
             rotation = self.rotationMatrixToEulerAngles(R)
-            print("translation", translation)
-        
-            # roll = 0
-            # pitch = 0
-            # yaw = 0
-        
+            # print("translation", translation)
             roll = rotation[0]
             pitch = rotation[1]
             yaw = rotation[2] 
-            print("rpy", roll, pitch, yaw)
+            # print("rpy", roll, pitch, yaw)
             R = pcd.get_rotation_matrix_from_xyz((roll, pitch, yaw))
             # print(R)
             pcd_r = pcd.rotate(R, center=(0, 0, 0))
-            
-            
             pcd_t = pcd_r.translate((translation[0], translation[1], translation[2]))
             
-            
             return pcd_t
-        
-    def visualize_pcd(self, pcd_list):
-        '''
-        
-        Parameters:
-        pcd_list = [pcd1, pcd2, ...etc]
-        '''
-        vis = o3d.visualization.Visualizer()
-        vis.create_window()
-        for i, pcd in enumerate(pcd_list):
-            vis.add_geometry(pcd)
-        vis.poll_events()
-        vis.update_renderer()
-        from time import sleep
-        sleep(1)
-        vis.destroy_window()
-            
-
-    
+           
     def draw_registration_result(self, source, target, transformation):
         source_temp = copy.deepcopy(source)
         target_temp = copy.deepcopy(target)
-        # source_temp.paint_uniform_color([1, 0.706, 0])
-        # target_temp.paint_uniform_color([0, 0.651, 0.929])
         source_temp.transform(transformation)
-        # o3d.visualization.draw_geometries([source_temp, target_temp]) 
-        self.visualize_pcd([source_temp, target_temp])
+        o3d.visualization.draw_geometries([source_temp, target_temp]) 
     
     def icp_fullpcd_mesh(self, full_pcd, mesh_pcd):
         
@@ -1102,9 +995,9 @@ class Perceptor():
                 o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=500)
             )
         
-        print(reg_p2p)
-        print("Transformation is:")
-        print(reg_p2p.transformation)
+        # print(reg_p2p)
+        # print("Transformation is:")
+        # print(reg_p2p.transformation)
         # self.draw_registration_result(source, target, reg_p2p.transformation)
             
         source1 = copy.deepcopy(source)
@@ -1126,13 +1019,10 @@ class Perceptor():
             mesh = o3d.io.read_triangle_mesh(mesh_file)
             pcd_mesh = mesh.sample_points_uniformly(20000)
             
-            
-            object_pose = object_pose
-            print("ICP init pose" ,object_pose , object_name )
+            # print("ICP init pose" ,object_pose , object_name)
         
             pcd_mesh = self.pcd_rotate_translate_setup(pcd_mesh, object_pose)
-            
-            
+            print(object_name)
             mesh_pcd = self.icp_fullpcd_mesh(pcd_full, pcd_mesh)
 
             pcd_full = o3dp.merge_pcds([pcd_full, mesh_pcd])
@@ -1140,15 +1030,6 @@ class Perceptor():
     
     
         return pcd_full
-    
-    
-    
-    
-    
-    
-    
-    
-    
     
     def percept(
             self,
@@ -1172,63 +1053,8 @@ class Perceptor():
         '''
         # Capture Data
         full_pcd, color_images, camera_poses = self.capture_data()
-        # Compute Grasping Poses (Many Poses in a Scene)
-
-        o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
-        # full_pcd = o3d.io.read_point_cloud("/root/ocrtoc_ws/src/test.pcd")
-        # gg = self.compute_grasp_pose(full_pcd)
-        # gg, t = self.compute_grasp_pose(full_pcd)
-        # if self.debug_pointcloud:
-        #     # print('g pose from the return function {}'.format(t))
-        #     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-        #     frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-        #     # frame_grasp_pose.transform(t)
-        #     o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
-
-        # Computer Object 6d Poses
-        # print("Object list in perceptor: {}".format(object_list))
-        # object_poses = self.compute_6d_pose(
-        #     full_pcd = full_pcd,
-        #     color_images = color_images,
-        #     camera_poses = camera_poses,
-        #     pose_method = pose_method,
-        #     object_list = object_list
-        # )
-
-        # # full_pcd_re = self.icp_finer(full_pcd, object_poses)
-        # # print(full_pcd_re)
-        # # o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test_icp.pcd", full_pcd_re)
-        # # o3d.visualization.draw_geometries([full_pcd_re])
         
-        # # full_pcd_contact = copy.deepcopy(full_pcd_re)
-        # gg, t = self.compute_grasp_pose(full_pcd)
-        # o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test_contact.pcd", full_pcd)
-        # pcd_file = "/root/ocrtoc_ws/src/test_contact.pcd"
-        # # pcd_contact = o3d.io.read_point_cloud(pcd_file)
-        # # print(pcd_contact)
-        # # frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-        # # frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-        # # merged_pcds = o3dp.merge_pcds([frame, pcd_contact, *gg.to_open3d_geometry_list()])
-        # # o3dp.io.write_point_cloud('/root/ocrtoc_ws/src/grasp_debug.pcd', merged_pcds)
-        # if self.debug_pointcloud:
-        #     # print('g pose from the return function {}'.format(t))
-        #     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-        #     frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-        #     # frame_grasp_pose.transform(t)
-        #     o3d.visualization.draw_geometries([frame,frame_grasp_pose])
-        #     o3d.visualization.draw_geometries([frame,frame_grasp_pose, *gg.to_open3d_geometry_list()])
-        #     o3d.visualization.draw_geometries([full_pcd])
-        #     o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
-            
-        
-        
-        
-        # # Assign the Best Grasp Pose on Each Object
-        # grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
-        # if self.debug and pose_method == 'icp':
-        #     o3d.visualization.draw_geometries([full_pcd, *remain_gg])
-        # return object_poses, grasp_poses
-
+        #Compute 6d pose
         print("Object list in perceptor: {}".format(object_list))
         object_poses = self.compute_6d_pose(
             full_pcd = full_pcd,
@@ -1237,35 +1063,25 @@ class Perceptor():
             pose_method = pose_method,
             object_list = object_list
         )
+        
+        # o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
+        
+        ##ICP to reconstruct pcd of the scene with meshes        
         # self.pcd = full_pcd
         # full_pcd = self.icp_finer(full_pcd, object_poses )
         
         # Compute Grasping Poses (Many Poses in a Scene)
-        o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
-        # pcd_vis=  copy.deepcopy(full_pcd)
-        # o3d.visualization.draw_geometries([pcd_vis])
         gg, t = self.compute_grasp_poses3(full_pcd)
         if self.debug_pointcloud:
-            # print('g pose from the return function {}'.format(t))
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-            # frame_grasp_pose.transform(t)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
 
         # Assign the Best Grasp Pose on Each Object
         grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
         
         print("grasps ready")
-        # print(grasp_poses)
-        # print(remain_gg)
-        # if self.debug_grasp:
-            
-        #     frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-        #     frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-           
-        #     o3d.visualization.draw_geometries([frame, full_pcd, *remain_gg.to_open3d_geometry_list(), frame_grasp_pose])
-
-            
+                    
         return object_poses, grasp_poses
 
 

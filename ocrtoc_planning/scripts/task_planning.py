@@ -29,27 +29,14 @@ import rospy
 from sensor_msgs.msg import JointState
 import time
 
-# from primitives import GRASP, collision_test, distance_fn, DiscreteTAMPState, get_shift_one_problem, get_shift_all_problem
-# from viewer import DiscreteTAMPViewer, COLORS
 from tf.transformations import euler_from_quaternion, quaternion_from_euler
 
-# Imports for camera related stuff
 from numpy.core.numeric import full
-import cv2
-import open3d as o3d
-# import open3d_plus as o3dp
-# import open3d_plus as o3dp
-# from .arm_controller_for_task_planner import ArmController
-from ocrtoc_common.camera_interface import CameraInterface
-# from ocrtoc_common.transform_interface import TransformInterface
 from sensor_msgs.msg import CameraInfo, Image, PointCloud2
 
 # ORTOOLS imports
 from ortools.constraint_solver import routing_enums_pb2
 from ortools.constraint_solver import pywrapcp
-
-
-        
 
 
 class TaskPlanner(object):
@@ -87,12 +74,7 @@ class TaskPlanner(object):
         self._world_axis_z = np.array([0, 0, 1])
         self._transformer = TransformInterface()
         self._motion_planner = MotionPlanner()
-        
-        
-        
-        self.clear_box_flag = False
-              
-        
+                
         self.block_labels = blocks
         self.object_goal_pose_dict = self.get_goal_pose_dict(self.block_labels, goal_cartesian_poses)
         self.block_labels_with_duplicates = self.object_goal_pose_dict.keys()
@@ -111,7 +93,6 @@ class TaskPlanner(object):
         print("task planner constructed")
 
        
-    
 
     def get_pose_perception(self, target_object_list):
         """
@@ -155,15 +136,13 @@ class TaskPlanner(object):
                     
 
         for result in perception_result.perception_result_list:
-                       
-            
             if result.be_recognized: 
                 def get_rotation (quat):
                         orientation_q = quat.orientation
                         orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
                         (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
                         return np.array([roll, pitch, yaw])
-                f_pose = self.object_goal_pose_dict[result.object_name] #self._goal_cartesian_pose_dic[result.object_name]
+                f_pose = self.object_goal_pose_dict[result.object_name] 
                 print("result.object_pose.pose: {}\nf_pose: {}".format(result.object_pose.pose, f_pose))
                 
                 # rrc: Object pose and goal pose comparison happens here (the objects with similar goal and initial poses will be deleted)
@@ -175,53 +154,39 @@ class TaskPlanner(object):
                 final_quat = get_rotation(f_pose)
                 
                 cart_dist = np.linalg.norm(init_cart_coords - final_cart_coords)
-                quat_dist = np.linalg.norm(init_quat - final_quat) # np.linalg.norm(result.object_pose.pose[4:7] - self._goal_cartesian_pose_dic[result.object_name][4:7])
+                quat_dist = np.linalg.norm(init_quat - final_quat) 
                 cartesian_dist_thresh = 0.05
                 quaternion_dist_thresh = 0.001
-                print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
+                print("distance check: ",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
                 if 'clear_box' not in result.object_name:
                     if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
-                        # del self._completed_objects[result.object_name]
                         continue
-                
+               
                 else:
                     if((np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2) and tray_count < 2):
-                        print("Clear tray")
+                        # print("Clear tray found")
                         print(init_cart_coords[1], final_cart_coords[1])
-                        
                         result.is_graspable = False
                     
                     elif tray_count>1:  
-                            print(self.left_object_labels)
                             
                             remove_indexes = [i for i, j in enumerate(self.left_object_labels) if 'clear_box' in j]
-                            print("remove indices",remove_indexes)
-                            
                             self.left_object_labels = [i for j, i in enumerate(self.left_object_labels) if j not in remove_indexes]
                             print("self.left_object_labels", self.left_object_labels)
-                            # del self.left_object_labels[result.object_name]
                                                 
                             continue
-                print("print(self.left_object_labels)", self.left_object_labels)
+                print("Left Object Labels", self.left_object_labels)
                 # rrc: Object pose and goal pose comparison ends here
-                
                 if result.is_graspable:
                     
                     self.object_init_pose_dict[result.object_name] = result.object_pose.pose
                     self.object_pick_grasp_pose_dict[result.object_name] = copy.deepcopy(result.grasp_pose.pose)
-                    
                     self.object_place_grasp_pose_dict[result.object_name] = self.get_target_grasp_pose2(result.object_pose.pose, result.grasp_pose.pose, self.object_goal_pose_dict[result.object_name])
-                    
-                    # self.object_place_grasp_pose_dict[result.object_name] = copy.deepcopy(result.grasp_pose.pose)
-                    # self.object_place_grasp_pose_dict[result.object_name].position.z += 0.2 # Dropping from certain minimal height
-                    
                     self.detected_object_label_list.append(result.object_name)
             else:
                 pass
             
-    
-
-    # modulate intelligence grasp pose to avoid collision
+# modulate intelligence grasp pose to avoid collision
     def get_artificial_intelligence_grasp_pose(self, intelligence_grasp_pose):
         artificial_intelligence_grasp_pose = Pose()
         intelligence_pose_matrix = self._transformer.ros_pose_to_matrix4x4(intelligence_grasp_pose)
@@ -295,10 +260,7 @@ class TaskPlanner(object):
         grasp_pose2 = self._transformer.matrix4x4_to_ros_pose(grasp_pose2_matrix)
 
         return grasp_pose2
-    
-    def search_strings2(self, object_name, searchable_list):
-        return any([x in object_name for x in searchable_list])
-    
+   
     def search_strings(self, string_list, searchable):
         return any([searchable in x for x in string_list])
     
@@ -310,12 +272,6 @@ class TaskPlanner(object):
         dm = distance_matrix(nodes, nodes).tolist()
 
         data['distance_matrix'] = dm
-        # data['pickups_deliveries'] = [
-        #     [1, 5],
-        #     [2, 6],
-        #     [3, 7],
-        #     [4, 8]
-        # ]
         data['pickups_deliveries'] = []
         n_picks = (len(nodes) - 1)/2
         for i in range(n_picks):
@@ -347,22 +303,15 @@ class TaskPlanner(object):
         goal_pose_dict = {}
                               
         for label, poses in zip(block_labels, goal_poses):
-            
-            # if self.search_strings2(label, ['clear_box']): #, 'book', 'round_plate', 'plate_holder']):
-            #     continue
-                       
+                                   
             print("Poses: {}".format(poses))
-            print("Poses type: {}".format(type(poses)))
             for i, pose in enumerate(poses.poses):
                 goal_pose_dict["{}_v{}".format(label, i)] = pose
-            # goal_pose_dict[label] = pose
         return goal_pose_dict   
 
     def print_solution(self, data, manager, routing, solution):
         """Prints solution on console."""
-        # print(f"Objective: {solution.ObjectiveValue()}")
         print("Objective: {}".format(solution.ObjectiveValue()))
-        # print("")
         total_distance = 0
         for vehicle_id in range(data['num_vehicles']):
             index = routing.Start(vehicle_id)
@@ -379,7 +328,6 @@ class TaskPlanner(object):
             print(plan_output)
             total_distance += float(route_distance)/100
         print('Total Distance of all routes: {}m'.format(total_distance))
-        # [END solution_printer]
         
     def get_final_sequence_from_ORsolution(self, data, manager, routing, solution):
         """Returns the final sequence of actions by decoding the solution spit out by OR TOOLS optimization
@@ -393,35 +341,19 @@ class TaskPlanner(object):
             route_distance = 0
             while not routing.IsEnd(index):
                 final_sequence.append(manager.IndexToNode(index))
-                # plan_output += ' {} -> '.format(manager.IndexToNode(index))
                 previous_index = index
                 index = solution.Value(routing.NextVar(index))
-                # route_distance += routing.GetArcCostForVehicle(
-                    # previous_index, index, vehicle_id)
             final_sequence.append(manager.IndexToNode(index))
-            # plan_output += '{}\n'.format(manager.IndexToNode(index))
-            # plan_output += 'Distance of the route: {}m\n'.format(float(route_distance)/100)
             print("Final sequence: {}, type: {}".format(final_sequence, type(final_sequence)))
-            # total_distance += float(route_distance)/100
         return final_sequence
 
     def solve_orTools(self, data):
         """Entry point of the program."""
-        # Instantiate the data problem.
-        # [START data]
-        # data = create_data_model()
-        # [END data]
-
-        # Create the routing index manager.
-        # [START index_manager]
+        
         manager = pywrapcp.RoutingIndexManager(len(data['distance_matrix']),
                                             data['num_vehicles'], data['depot'])
-        # [END index_manager]
-
-        # Create Routing Model.
         # [START routing_model]
         routing = pywrapcp.RoutingModel(manager)
-
         # [END routing_model]
         
         def demand_callback(from_index):
@@ -514,13 +446,11 @@ class TaskPlanner(object):
                 print("Going to pick {}\t|\t".format(object_name))
                 self._motion_planner.fake_place()
                 success = self.go_pick_object(object_name=object_name)
-                 # 3. Check if the object is grapsed
-                # success = self.gripper_width_test()
                                      
                 if success == False:
                     print("Pick failed")
                 else:
-                    print("Pick success")
+                    print("Pick check")
             elif self.search_strings([name], searchable='place') and success==True:
                 print("Going to place {}\t|\t".format(object_name))
                 success = self.go_place_object(object_name)
@@ -543,13 +473,8 @@ class TaskPlanner(object):
         5. Go back to step 1 if all objects are not picked and placed yet
         """
 
-        # self._motion_planner.test()
-
-        # exit()
-
         print("Cycle plan function started executing!")
         self.left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
-        
         
         count = 0
         while len(self.left_object_labels) > 0 and count <= 5:
@@ -564,7 +489,6 @@ class TaskPlanner(object):
 
             # 4. Create pick and place grasp pose lists and final list of nodes
             rest_pose = Pose()
-        
             rest_pose.position.x = -0.112957249941
             rest_pose.position.y = 2.9801544038e-05
             rest_pose.position.z = 0.590340135745
@@ -582,7 +506,6 @@ class TaskPlanner(object):
                 'pose': rest_pose
             }
             
-            
             detected_object_list = []
             for left_object in self.left_object_labels:
                 if left_object in self.detected_object_label_list:
@@ -591,10 +514,8 @@ class TaskPlanner(object):
             
             self.detected_object_label_list = detected_object_list
             
-            
             n_detected_objects = len(self.detected_object_label_list )
             print(self.detected_object_label_list)
-                       
             
             for lab_index, label in enumerate(self.detected_object_label_list ):
                 
@@ -665,10 +586,9 @@ class TaskPlanner(object):
         Returns:
         is_picked: boolean - If true, the object is successfully held in the arm, and we can proceed to place pose. Otherwise, go to next object.
         '''
-        is_picked=False
         # 1. Go to pick pose
         pick_grasp_pose = self.object_pick_grasp_pose_dict[object_name]
-        print("pick grasp pose")
+        # print("pick grasp pose")
         orientation_q = pick_grasp_pose.orientation
         orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
         (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
@@ -684,7 +604,7 @@ class TaskPlanner(object):
         plan_result = self._motion_planner.move_cartesian_space_upright(pick_grasp_pose, via_up=True, last_gripper_action='place')
         
         if plan_result == False:
-            return is_picked
+            return plan_result
         
         # 2. Now pick the object up
         self._motion_planner.pick()
@@ -710,8 +630,8 @@ class TaskPlanner(object):
                 # plan_result = self._motion_planner.move_cartesian_space(grasp_pose)  # move in cartesian straight path
                 # plan_result = self._motion_planner.move_cartesian_space_discrete(grasp_pose)  # move in cartesian discrete path
                 
-        print("in place")
-        print('$'*80) 
+        # print("in place")
+        # print('$'*80) 
         print(" grasp pose is")
         print(grasp_pose)
                 

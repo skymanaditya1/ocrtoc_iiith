@@ -152,8 +152,13 @@ class Grasp_Detector():
         eelink_pose = self.get_eelink_pose()
         object_poses = self.get_4x4_object_poses()
         for alias in self.alias_list:
-            dt = object_poses[alias][:3, 3] - eelink_pose[:3, 3]
-            distance_list.append(np.linalg.norm(dt))
+            try:
+                dt = object_poses[alias][:3, 3] - eelink_pose[:3, 3]
+                distance_list.append(np.linalg.norm(dt))
+            except:
+                continue
+        if distance_list == []:
+            return None
         min_index = np.argmin(np.array(distance_list))
         min_distance = distance_list[min_index]
         if min_distance < GRASPING_DISTANCE_THRESH:

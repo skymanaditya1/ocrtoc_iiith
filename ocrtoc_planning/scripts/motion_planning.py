@@ -102,7 +102,6 @@ class MotionPlanner(object):
        
 
         self.to_home_pose()
-        # self.test()
         self.place()
         rospy.sleep(1.0)
         
@@ -122,62 +121,6 @@ class MotionPlanner(object):
         self._move_group.clear_pose_targets()
         rospy.sleep(1.0)
 
-    
-    def test(self):
-        
-        
-        pose_goal = Pose()
-              
-        
-        print("test 1, joint space to a REST POSE")
-        
-        self.to_rest_pose()
-        rospy.sleep(2)
-        time.sleep(10)
-        
-        
-        print("test 2 REST POSE to GOAL 1")
-        pose_goal.orientation.w = 1.0
-        pose_goal.position.x = 0.1
-        pose_goal.position.y = -0.3
-        pose_goal.position.z = 0.2
-        # self.move_joint_space(pose_goal)
-        self.move_cartesian_space_upright(pose_goal)
-        
-        rospy.sleep(2)
-        time.sleep(30)
-        
-        
-        print("test 3 GOAL to REST POSE manual ")
-        pose_goal.position.x = -0.112957249941
-        pose_goal.position.y = 2.9801544038e-05
-        pose_goal.position.z = 0.590340135745
-        pose_goal.orientation.x = -0.923949504923
-        pose_goal.orientation.y = 0.382514458771
-        pose_goal.orientation.z = -3.05585242637e-05
-        pose_goal.orientation.w = 1.57706453844e-05
-        
-        rospy.sleep(4)
-        time.sleep(5)
-             
-        print("tes 4 REST pose TO REST pose")
-        
-        self.to_rest_pose()
-        rospy.sleep(4)
-        time.sleep(5)
-        print("test 5 cartesian to goal")
-        pose_goal.orientation.w = 1.0
-        pose_goal.position.x = 0.1
-        pose_goal.position.y = 0.3
-        pose_goal.position.z = 0.2
-        self.move_cartesian_space_upright(pose_goal)
-        
-        print("test 6 joint to goal")
-        
-        self.to_rest_pose()
-    
-    
-    
     # move to specified home pose
     def to_rest_pose(self):
         
@@ -195,7 +138,7 @@ class MotionPlanner(object):
         attempts = 0
         waypoints = []
         group_goal = self.ee_goal_to_link8_goal(rest_pose)
-        print("group goal after tf", group_goal)
+        # print("group goal after tf", group_goal)
         group_goal = rest_pose
         
         waypoints.append(copy.deepcopy(group_goal))
@@ -209,7 +152,7 @@ class MotionPlanner(object):
             attempts += 1
 
         # if fraction == 1.0:
-        rospy.loginfo('Path computed successfully, moving robot')
+        rospy.loginfo('Path computed to REST POSE successfully, moving robot')
         self._move_group.execute(plan)
         self._move_group.stop()
         self._move_group.clear_pose_targets()
@@ -217,47 +160,13 @@ class MotionPlanner(object):
         move_result = True
         
         self._rest_joints = [0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785]
-        # current_pose = self._move_group.get_current_pose(self._end_effector).pose
-        # print("rest pose x,y,z: ", current_pose)
         self._move_group.set_joint_value_target(self._rest_joints)
         to_rest_result = self._move_group.go()
-        # rospy.sleep(1.0)
         print('to rest pose result:{}'.format(to_rest_result))
-        
-        # time.sleep(10)
-        current_pose = self._move_group.get_current_pose(self._end_effector).pose
-        print("rest pose x,y,z: ", current_pose)
+        # current_pose = self._move_group.get_current_pose(self._end_effector).pose
+        # print("rest pose x,y,z: ", current_pose)
         return to_rest_result
     
-    # move robot to home pose, then move from home pose to target pose
-    def move_from_home_pose(self, pose_goal):
-        from_home_result = True
-        to_home_result = self.to_home_pose()
-
-        if to_home_result:
-            points_to_target = self.get_points_to_target(pose_goal)
-            fraction = 0
-            attempts = 0
-            while fraction < 1.0 and attempts < self._max_attempts:
-                (plan, fraction) = self._move_group.compute_cartesian_path(
-                    points_to_target,                # way points
-                    self._plan_step_length,          # step length
-                    0.0,                             # disable jump
-                    True                             # enable avoid_collision
-                    )
-                attempts += 1
-
-            if fraction == 1.0:
-                self._move_group.execute(plan)
-                from_home_result = True
-            else:
-                from_home_result = False
-        else:
-            from_home_result = False
-
-        rospy.loginfo('move from home pose result' + str(from_home_result))
-        return from_home_result
-
     # move robot to home pose, then move from home pose to target pose
     def move_from_home_pose(self, pose_goal):
         from_home_result = True
@@ -394,12 +303,13 @@ class MotionPlanner(object):
     
     
     def gripper_width_test(self):
-        #check if the gripper distance is zero
-        print("joint state")
+        '''
+        check if the gripper distance is zero
+        '''
+        # print("joint state")
         joint_state = rospy.wait_for_message("/joint_states", JointState)
         gripper_dist = [joint_state.position[0], joint_state.position[1]]
         print("gripper distance is", gripper_dist)
-        # 0.0038156178900761884, 0.0036195879904434205]
         if gripper_dist[0] > 0.0005 and gripper_dist[1] > 0.0005:
             result = True #successully grabbed the object
         else:
@@ -415,26 +325,20 @@ class MotionPlanner(object):
         if pose_goal.position.z < 0.005:
             pose_goal.position.z = 0.01
         
-        print("pose goal", pose_goal)
-       
         quaternion = [pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w]
         
         (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
         
-        print("Roll: {}, Pitch: {}, Yaw: {}".format(roll, pitch, yaw))
+        # print("Roll: {}, Pitch: {}, Yaw: {}".format(roll, pitch, yaw))
         
         quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
         
         pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w = quaternion
         
         group_goal = self.ee_goal_to_link8_goal(pose_goal)
-        # group_goal = pose_goal
 
         points_to_target = self.get_points_to_target_upright(group_goal)
-        # points_to_target = self.get_points_to_target2(group_goal)
         
-        print("points to target")
-        print(points_to_target)
         
         for i, point in enumerate(points_to_target):
             
@@ -696,8 +600,6 @@ class MotionPlanner(object):
     def fake_place(self):
         
         self.to_rest_pose()
-        
-        
         self._gripper_client.wait_for_server()
         goal = control_msgs.msg.GripperCommandGoal()
         goal.command.position = 0.045 #0.039
@@ -718,7 +620,7 @@ class MotionPlanner(object):
         quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
         exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w = quaternion
         
-        #to prebvent a bug during pick. This is a fix not a solution. 
+        #to prevent a bug during pick. This is a fix not a solution. 
         curr_pose = [ round(current_pose.position.x, 2), round(current_pose.position.y, 2), round(current_pose.position.z, 2) ]
         rest_pose = [ round(elem, 2) for elem in self.rest_pose ]
         rest_pose1 = [ round(elem, 2) for elem in self.rest_pose1 ]
@@ -727,9 +629,6 @@ class MotionPlanner(object):
             exit_pose.position.z += self._up1
         points_to_target.append(copy.deepcopy(exit_pose))
         
-        print("curr pose", curr_pose)
-        print("rest pose", rest_pose)
-
         enter_pose = copy.deepcopy(target_pose)
         enter_pose.position.z += self._up2
 
