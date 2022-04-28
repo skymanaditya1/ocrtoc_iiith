@@ -569,10 +569,11 @@ class Perceptor():
         def pcd_rotate_setup(pcd, rotation):
         
         
-            roll = rotation[0] / 360. * (2*np.pi)
-            pitch = rotation[1] / 360. * (2*np.pi)
-            yaw = (rotation[2] / 360.) * (2*np.pi)
-            # print(roll, pitch, yaw)
+            roll = rotation[0] 
+            pitch = rotation[1] 
+            yaw = rotation[2] 
+            print(object_name)
+            print("rpy", roll, pitch, yaw)
             R = pcd.get_rotation_matrix_from_xyz((roll, pitch, yaw))
             # print(R)
             pcd_r = pcd.rotate(R, center=(0, 0, 0))
@@ -1019,10 +1020,15 @@ class Perceptor():
             R = object_pose['pose'][:3, :3]
             rotation = self.rotationMatrixToEulerAngles(R)
         
-            roll = rotation[0] / 360. * (2*np.pi)
-            pitch = rotation[1] / 360. * (2*np.pi)
-            yaw = (rotation[2] / 360.) * (2*np.pi)
-            # print(roll, pitch, yaw)
+        
+            roll = 0
+            pitch = 0
+            yaw = 0
+        
+            # roll = rotation[0] / 360. * (2*np.pi)
+            # pitch = rotation[1] / 360. * (2*np.pi)
+            # yaw = (rotation[2] / 360.) * (2*np.pi)
+            print("rpy", roll, pitch, yaw)
             R = pcd.get_rotation_matrix_from_xyz((roll, pitch, yaw))
             # print(R)
             pcd_r = pcd.rotate(R, center=(0, 0, 0))
@@ -1034,58 +1040,40 @@ class Perceptor():
             return pcd_t
 
     
+    def draw_registration_result(self, source, target, transformation):
+        source_temp = copy.deepcopy(source)
+        target_temp = copy.deepcopy(target)
+        # source_temp.paint_uniform_color([1, 0.706, 0])
+        # target_temp.paint_uniform_color([0, 0.651, 0.929])
+        source_temp.transform(transformation)
+        o3d.visualization.draw_geometries([source_temp, target_temp]) 
     
     def icp_fullpcd_mesh(self, full_pcd, mesh_pcd):
         
         reconstruction_config = self.config['reconstruction']
-        pcd = copy.deepcopy(full_pcd)
-        mesh_pcd = copy.deepcopy(mesh_pcd)
-        print("np.asarray(pcd.points).shape[0]", np.asarray(pcd.points).shape)
-        pcd.estimate_normals()
+        source = mesh_pcd
+        target = full_pcd
+        source.estimate_normals()
+        target.estimate_normals()
         
-        voxel_size = reconstruction_config['voxel_size']
+        print("Apply point-to-point ICP")
+        reg_p2p = o3d.pipelines.registration.registration_icp(
+                source,
+                target,
+                reconstruction_config['max_correspondence_distance'],
+                np.eye(4, dtype = np.float),
+                o3d.pipelines.registration.TransformationEstimationPointToPlane(),
+                o3d.pipelines.registration.ICPConvergenceCriteria(max_iteration=50)
+            )
         
-        income_pcd  =  copy.deepcopy(mesh_pcd)      
+        print(reg_p2p)
+        print("Transformation is:")
+        print(reg_p2p.transformation)
+        # self.draw_registration_result(source, target, reg_p2p.transformation)
             
-        # print("np.asarray(income_pcd.points).shape[0]", np.asarray(income_pcd.points).shape)
-            
-        if np.asarray(income_pcd.points).shape[0] == 0:
-            print("Mesh not readable")
-            return full_pcd
-            
-        income_pcd, _ = income_pcd.remove_statistical_outlier(
-            nb_neighbors = reconstruction_config['nb_neighbors'],
-            std_ratio = reconstruction_config['std_ratio']
-        )
-        income_pcd.estimate_normals()
-        income_pcd = income_pcd.voxel_down_sample(voxel_size)
-        transok_flag = False
-        for _ in range(reconstruction_config['icp_max_try']): # try 5 times max
-                reg_p2p = o3d.pipelines.registration.registration_icp(
-                    income_pcd,
-                    pcd,
-                    reconstruction_config['max_correspondence_distance'],
-                    np.eye(4, dtype = np.float),
-                    o3d.pipelines.registration.TransformationEstimationPointToPlane(),
-                    o3d.pipelines.registration.ICPConvergenceCriteria(reconstruction_config['icp_max_iter'])
-                )
-                if (np.trace(reg_p2p.transformation) > reconstruction_config['translation_thresh']) \
-                    and (np.linalg.norm(reg_p2p.transformation[:3, 3]) < reconstruction_config['rotation_thresh']):
-                    # trace for transformation matrix should be larger than 3.5
-                    # translation should less than 0.05
-                    transok_flag = True
-                    break
-        if not transok_flag:
-            reg_p2p.transformation = np.eye(4, dtype = np.float32)
-        income_pcd = income_pcd.transform(reg_p2p.transformation)
-        
-        pcd = o3dp.merge_pcds([pcd, income_pcd])
-        cd = pcd.voxel_down_sample(voxel_size)
-        pcd.estimate_normals()
-        return pcd
-            
-        
-    
+        source1 = copy.deepcopy(source)
+        source1.transform(reg_p2p.transformation)
+        return source1
     
     def icp_finer(self, pcd, object_poses):
         
@@ -1101,17 +1089,20 @@ class Perceptor():
                
             folder_path = self.mesh_folder
             folder_path = os.path.join(folder_path, mesh_name)
-            mesh_file = os.path.join(folder_path, 'visual.ply')
+            mesh_file = os.path.join(folder_path, 'textured.obj')
+            mesh = o3d.io.read_triangle_mesh(mesh_file)
+            pcd_mesh = mesh.sample_points_uniformly(20000)
+            
+            
             object_pose = object_pose
-        
-            pcd_mesh = o3d.io.read_point_cloud(mesh_file)
+            print("ICP init pose" ,object_pose , object_name )
         
             pcd_mesh = self.pcd_rotate_translate_setup(pcd_mesh, object_pose)
             
             
-            pcd_full = self.icp_fullpcd_mesh(pcd_full, pcd_mesh)
+            mesh_pcd = self.icp_fullpcd_mesh(pcd_full, pcd_mesh)
 
-        
+            pcd_full = o3dp.merge_pcds([pcd_full, mesh_pcd])
         
         
         
@@ -1144,6 +1135,8 @@ class Perceptor():
 
         # Computer Object 6d Poses
         print("Object list in perceptor: {}".format(object_list))
+        
+        # object_list = ['clear_box_1_v0']
         object_poses = self.compute_6d_pose(
             full_pcd = full_pcd,
             color_images = color_images,
@@ -1151,12 +1144,12 @@ class Perceptor():
             pose_method = pose_method,
             object_list = object_list
         )
-        # self.pcd = full_pcd
-        # full_pcd = self.icp_finer(full_pcd, object_poses )
+        
+        full_pcd = self.icp_finer(full_pcd, object_poses )
         
         # Compute Grasping Poses (Many Poses in a Scene)
         o3d.io.write_point_cloud("/root/ocrtoc_ws/src/test.pcd", full_pcd)
-        # pcd_vis=  copy.deepcopy(full_pcd)
+        # pcd_vis =  copy.deepcopy(full_pcd)
         # o3d.visualization.draw_geometries([pcd_vis])
         gg, t = self.compute_grasp_poses3(full_pcd)
         if self.debug_pointcloud:
