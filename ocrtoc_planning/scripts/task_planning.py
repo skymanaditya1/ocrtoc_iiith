@@ -646,9 +646,9 @@ class TaskPlanner(object):
             yaw = yaw + np.pi
         orientation_q = quaternion_from_euler(roll, pitch, yaw)
         grasp_pose.orientation = Quaternion(*orientation_q) 
-             
+        print("test a")     
         plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action='pick')
-        rospy.sleep(1.0)
+        
         
         is_placed = plan_result
         

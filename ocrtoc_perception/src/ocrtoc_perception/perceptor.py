@@ -234,7 +234,7 @@ class Perceptor():
                 arm_poses = np.array(self.fixed_arm_poses_both).tolist()
             for j, arm_pose in enumerate(arm_poses):
                 self.arm_controller.exec_joint_goal(arm_pose)
-                rospy.sleep(2.0)
+                rospy.sleep(2.5)
                 time.sleep(1.0)
                 color_image = self.get_color_image()
                 color_image = cv2.cvtColor(color_image, cv2.COLOR_RGBA2RGB)

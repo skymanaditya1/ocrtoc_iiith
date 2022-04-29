@@ -154,6 +154,7 @@ class MotionPlanner(object):
         # if fraction == 1.0:
         rospy.loginfo('Path computed to REST POSE successfully, moving robot')
         self._move_group.execute(plan)
+        rospy.sleep(1.0)
         self._move_group.stop()
         self._move_group.clear_pose_targets()
         rospy.loginfo('Path execution completed')
@@ -334,11 +335,11 @@ class MotionPlanner(object):
         quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
         
         pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w = quaternion
-        
+        print("test b")
         group_goal = self.ee_goal_to_link8_goal(pose_goal)
-
+        print("test c")
         points_to_target = self.get_points_to_target_upright(group_goal)
-        
+        print("test d")
         
         for i, point in enumerate(points_to_target):
             
@@ -611,9 +612,11 @@ class MotionPlanner(object):
     # get a list of via points from current position to target position (add exit and entrance point to pick and place position)
     def get_points_to_target_upright(self, target_pose):
         points_to_target = []
+        print("test1")
+        rospy.sleep(1.5)
         current_pose = self._move_group.get_current_pose(self._end_effector).pose
-        
-        
+        rospy.sleep(1.5)
+        print("test 2")
         exit_pose = copy.deepcopy(current_pose)
         quaternion = [exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w]
         (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
