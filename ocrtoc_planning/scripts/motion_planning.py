@@ -221,11 +221,12 @@ class MotionPlanner(object):
         # print("rest pose x,y,z: ", current_pose)
         self._move_group.set_joint_value_target(self._rest_joints)
         to_rest_result = self._move_group.go()
-        # rospy.sleep(1.0)
+        
         print('to rest pose result:{}'.format(to_rest_result))
         
         # time.sleep(10)
         current_pose = self._move_group.get_current_pose(self._end_effector).pose
+        rospy.sleep(1.5)
         print("rest pose x,y,z: ", current_pose)
         return to_rest_result
     
@@ -427,9 +428,10 @@ class MotionPlanner(object):
         
         pose_goal.orientation.x, pose_goal.orientation.y, pose_goal.orientation.z, pose_goal.orientation.w = quaternion
         
+        print("Fail test 1")
         group_goal = self.ee_goal_to_link8_goal(pose_goal)
         # group_goal = pose_goal
-
+        print("Fail test 2")
         points_to_target = self.get_points_to_target_upright(group_goal)
         # points_to_target = self.get_points_to_target2(group_goal)
         
@@ -709,20 +711,23 @@ class MotionPlanner(object):
     # get a list of via points from current position to target position (add exit and entrance point to pick and place position)
     def get_points_to_target_upright(self, target_pose):
         points_to_target = []
-        current_pose = self._move_group.get_current_pose(self._end_effector).pose
         
+        print("test3")
+        current_pose = self._move_group.get_current_pose(self._end_effector).pose
+        rospy.sleep(1)
+        print("test3'")
         
         exit_pose = copy.deepcopy(current_pose)
         quaternion = [exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w]
         (roll, pitch, yaw) = tf.transformations.euler_from_quaternion(quaternion)
         quaternion = tf.transformations.quaternion_from_euler(np.pi, 0, yaw)
         exit_pose.orientation.x, exit_pose.orientation.y, exit_pose.orientation.z, exit_pose.orientation.w = quaternion
-        
+        print("test4")
         #to prebvent a bug during pick. This is a fix not a solution. 
         curr_pose = [ round(current_pose.position.x, 2), round(current_pose.position.y, 2), round(current_pose.position.z, 2) ]
         rest_pose = [ round(elem, 2) for elem in self.rest_pose ]
         rest_pose1 = [ round(elem, 2) for elem in self.rest_pose1 ]
-        
+        print("test5")
         if curr_pose != rest_pose and curr_pose!=rest_pose1:
             exit_pose.position.z += self._up1
         points_to_target.append(copy.deepcopy(exit_pose))

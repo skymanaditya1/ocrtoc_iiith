@@ -247,7 +247,7 @@ class Perceptor():
                 arm_poses = np.array(self.fixed_arm_poses_both).tolist()
             for j, arm_pose in enumerate(arm_poses):
                 self.arm_controller.exec_joint_goal(arm_pose)
-                rospy.sleep(2.0)
+                rospy.sleep(2.5)
                 time.sleep(1.0)
                 # if j not in self.config['reconstruction']['both_camera_order']:
                 #     continue
