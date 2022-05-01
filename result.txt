@@ -37,3 +37,7 @@ Task name: 6-2-1 | Scene mean score: 0.287485835291 | Time cost: 404.204
 Task name: 6-2-3 | Scene mean score: 0.434129960841 | Time cost: 90.86
 Task name: 6-3-1 | Scene mean score: 0.361832789934 | Time cost: 602.0
 Task name: 6-3-2 | Scene mean score: 0.398914071848 | Time cost: 602.0
+Task name: 1-1-1 | Scene mean score: 0.0465522705341 | Time cost: 259.26
+Task name: 1-1-2 | Scene mean score: 0.33975044914 | Time cost: 160.852
+Task name: 1-1-2 | Scene mean score: 0.339715141335 | Time cost: 169.624
+Task name: 2-1-1 | Scene mean score: 0.177752182293 | Time cost: 602.0

@@ -686,7 +686,13 @@ class TaskPlanner(object):
         rospy.loginfo(str(len(perception_result.perception_result_list)) + ' objects are graspable:')
         rospy.loginfo('Graspable objects information: ')
         
-               
+        tray_count = 0       
+
+        for result in perception_result.perception_result_list:
+            if 'clear_box' in result.object_name:
+                    #can't handle 2 trays as the intial object poses are getting interchanged between the 2 trays. 
+                    tray_count = tray_count + 1  
+                    
 
         for result in perception_result.perception_result_list:
             if result.be_recognized: 
@@ -695,7 +701,7 @@ class TaskPlanner(object):
                         orientation_list = [orientation_q.x, orientation_q.y, orientation_q.z, orientation_q.w]
                         (roll, pitch, yaw) = euler_from_quaternion(orientation_list)
                         return np.array([roll, pitch, yaw])
-                f_pose = self.object_goal_pose_dict[result.object_name] #self._goal_cartesian_pose_dic[result.object_name]
+                f_pose = self.object_goal_pose_dict[result.object_name] 
                 print("result.object_pose.pose: {}\nf_pose: {}".format(result.object_pose.pose, f_pose))
                 
                 # rrc: Object pose and goal pose comparison happens here (the objects with similar goal and initial poses will be deleted)
@@ -707,31 +713,34 @@ class TaskPlanner(object):
                 final_quat = get_rotation(f_pose)
                 
                 cart_dist = np.linalg.norm(init_cart_coords - final_cart_coords)
-                quat_dist = np.linalg.norm(init_quat - final_quat) # np.linalg.norm(result.object_pose.pose[4:7] - self._goal_cartesian_pose_dic[result.object_name][4:7])
+                quat_dist = np.linalg.norm(init_quat - final_quat) 
                 cartesian_dist_thresh = 0.05
                 quaternion_dist_thresh = 0.001
-                print("distance check !!!!!!",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
+                print("distance check: ",result.object_name , np.abs(init_cart_coords[1] - final_cart_coords[1]))
                 if 'clear_box' not in result.object_name:
                     if (cart_dist < cartesian_dist_thresh) and (quat_dist < quaternion_dist_thresh):
-                        # del self._completed_objects[result.object_name]
                         continue
+               
                 else:
-                    if (np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2):
-                        # del self._completed_objects[result.object_name]
-                        continue
-                
+                    if((np.abs(init_cart_coords[1] - final_cart_coords[1]) < 0.2) and tray_count < 2):
+                        # print("Clear tray found")
+                        print(init_cart_coords[1], final_cart_coords[1])
+                        result.is_graspable = False
+                    
+                    elif tray_count>1:  
+                            
+                            remove_indexes = [i for i, j in enumerate(self.left_object_labels) if 'clear_box' in j]
+                            self.left_object_labels = [i for j, i in enumerate(self.left_object_labels) if j not in remove_indexes]
+                            print("self.left_object_labels", self.left_object_labels)
+                                                
+                            continue
+                print("Left Object Labels", self.left_object_labels)
                 # rrc: Object pose and goal pose comparison ends here
-                
                 if result.is_graspable:
                     
                     self.object_init_pose_dict[result.object_name] = result.object_pose.pose
                     self.object_pick_grasp_pose_dict[result.object_name] = copy.deepcopy(result.grasp_pose.pose)
-                    
                     self.object_place_grasp_pose_dict[result.object_name] = self.get_target_grasp_pose2(result.object_pose.pose, result.grasp_pose.pose, self.object_goal_pose_dict[result.object_name])
-                    
-                    # self.object_place_grasp_pose_dict[result.object_name] = copy.deepcopy(result.grasp_pose.pose)
-                    # self.object_place_grasp_pose_dict[result.object_name].position.z += 0.2 # Dropping from certain minimal height
-                    
                     self.detected_object_label_list.append(result.object_name)
             else:
                 pass
@@ -1248,9 +1257,7 @@ class TaskPlanner(object):
 
         done = False
 
-        # f = open('/root/plan_result.txt', 'a')
-        # f.close()
-
+        
         while not done:
             action = self.get_next_best_action(action_list, action_sequence_mapping)
             if action == "done":
@@ -1260,10 +1267,7 @@ class TaskPlanner(object):
             name = action_sequence_mapping[str(action)]['name']
             object_name = action_sequence_mapping[str(action)]['object']
 
-            f = open('/root/plan_result.txt', 'a')
-            f.write("\nAction_name: {}\tObject name: {}".format(name, object_name))
-            f.close()
-
+            
             buffer_pose = None
 
             # If target is partially or fully occupied, sample a buffer spot
@@ -1350,16 +1354,9 @@ class TaskPlanner(object):
         """
 
         print("Cycle plan function started executing!")
-        left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
+        self.left_object_labels = copy.deepcopy(self.block_labels_with_duplicates)
         
-        # Remove clear_box from the list of movable objects
-        temp = []
-        for object in left_object_labels:
-            if self.search_strings2(object, ['clear_box']): #, 'book', 'round_plate', 'plate_holder']):
-                continue
-            temp.append(object)
-        left_object_labels = copy.deepcopy(temp)
-
+        
         import pickle
         object_dict = {}
         for i, key in enumerate(self.object_goal_pose_dict.keys()):
@@ -1399,7 +1396,7 @@ class TaskPlanner(object):
         self.create_global_object_dict()
              
         # 1.3 Create occupancy kernel maps for each object
-        for obj_label in left_object_labels:
+        for obj_label in self.left_object_labels:
             target_pose = self.object_goal_pose_dict[obj_label]
             position = target_pose.position
             pos = [position.x, position.y, position.z]
@@ -1416,12 +1413,10 @@ class TaskPlanner(object):
         # 2. Create red nodes for initial poses
         # self.red_nodes = self.initialize_initial_red_nodes(self.block_labels_with_duplicates)
 
-        f = open('/root/plan_result.txt', 'w+')
-        f.close()
-            
+                   
         count = 0
         label_count = 1
-        while len(left_object_labels) > 0 and count <= 5:
+        while len(self.left_object_labels) > 0 and count <= 5:
 
             self.set_temp_status_not_done()
 
@@ -1431,7 +1426,7 @@ class TaskPlanner(object):
             self.detected_object_label_list = []
             
             rospy.loginfo('Try to get information of left objects from perception node')
-            self.get_pose_perception(left_object_labels)
+            self.get_pose_perception(self.left_object_labels)
             print("Detected object list: {}".format(self.detected_object_label_list))
 
             f = open('/root/plan_result.txt', 'a')
@@ -1460,7 +1455,7 @@ class TaskPlanner(object):
             
             
             detected_object_list = []
-            for left_object in left_object_labels:
+            for left_object in self.left_object_labels:
                 if left_object in self.detected_object_label_list:
                     detected_object_list.append(left_object)
             
@@ -1530,22 +1525,22 @@ class TaskPlanner(object):
             
             # 9. Remove completed objects
             temp = []
-            for object in left_object_labels:
+            for object in self.left_object_labels:
                 if object in completed_objects:
                     continue
                 temp.append(object)
-            left_object_labels = temp
-            print("left objects: {}".format(left_object_labels))
+            self.left_object_labels = temp
+            print("left objects: {}".format(self.left_object_labels))
 
             f = open('/root/plan_result.txt', 'a')
-            f.write("\nLeft objects: {}\n===============================================================================\n".format(left_object_labels))
+            f.write("\nLeft objects: {}\n===============================================================================\n".format(self.left_object_labels))
             f.close()
 
             print("************************Iteration {}***********************************************".format(count))
             
             self._motion_planner.to_rest_pose()
 
-            if len(left_object_labels)==0:
+            if len(self.left_object_labels)==0:
                 break
             
             
@@ -1720,7 +1715,7 @@ class TaskPlanner(object):
         print(" grasp pose is")
         print(grasp_pose)
                 
-        grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+        grasp_pose.position.z = grasp_pose.position.z + 0.1
         
         
         orientation_q = grasp_pose.orientation
@@ -1769,7 +1764,7 @@ class TaskPlanner(object):
                 print(" grasp pose is")
                 print(grasp_pose)
                 
-                grasp_pose.position.z = 0.2 if self.clear_box_flag else (grasp_pose.position.z + 0.050)
+                grasp_pose.position.z = grasp_pose.position.z + 0.1
                 
                 plan_result = self._motion_planner.move_cartesian_space_upright(grasp_pose, last_gripper_action=self._last_gripper_action)  # move in cartesian discrete upright path
                 if plan_result:
