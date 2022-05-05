@@ -233,8 +233,9 @@ class Perceptor():
             else:
                 arm_poses = np.array(self.fixed_arm_poses_both).tolist()
             for j, arm_pose in enumerate(arm_poses):
+                rospy.sleep(1.5)
                 self.arm_controller.exec_joint_goal(arm_pose)
-                rospy.sleep(2.5)
+                rospy.sleep(1.5)
                 time.sleep(1.0)
                 color_image = self.get_color_image()
                 color_image = cv2.cvtColor(color_image, cv2.COLOR_RGBA2RGB)
@@ -939,12 +940,12 @@ class Perceptor():
                 'qz': gqz
             }
             
-            points_bb = self.get_bounding_box(object_name, object_pose)
+            # points_bb = self.get_bounding_box(object_name, object_pose)
             
-            min_x  = np.min(points_bb[:,0])
-            min_y  = np.min(points_bb[:,1])
-            max_x  = np.max(points_bb[:,0])
-            max_y  = np.max(points_bb[:,1])
+            # min_x  = np.min(points_bb[:,0])
+            # min_y  = np.min(points_bb[:,1])
+            # max_x  = np.max(points_bb[:,0])
+            # max_y  = np.max(points_bb[:,1])
             
             # print(object_name)
             # print(grasp_poses[object_name])
@@ -1054,6 +1055,14 @@ class Perceptor():
         # Capture Data
         full_pcd, color_images, camera_poses = self.capture_data()
         
+        gg, t = self.compute_grasp_poses3(full_pcd)
+        i=0
+        while i<3:
+            print("GRASPS GENERATED !!!!!!!!!!!!")
+            
+            print(" ")
+            i=i+1
+        
         #Compute 6d pose
         print("Object list in perceptor: {}".format(object_list))
         object_poses = self.compute_6d_pose(
@@ -1071,16 +1080,27 @@ class Perceptor():
         # full_pcd = self.icp_finer(full_pcd, object_poses )
         
         # Compute Grasping Poses (Many Poses in a Scene)
-        gg, t = self.compute_grasp_poses3(full_pcd)
+        
         if self.debug_pointcloud:
             frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
             o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
 
         # Assign the Best Grasp Pose on Each Object
+        i=0
+        while i<3:
+            print("ASSIGNING GRASP POSE !!!!!!!!!!!!")
+            
+            print(" ")
+            i=i+1
         grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
-        
-        print("grasps ready")
+        i=0
+        while i<3:
+            print("ASSIGNED GRASP POSE !!!!!!!!!!!!")
+            
+            # print(" ")
+            # i=i+1
+            # print("grasps ready")
                     
         return object_poses, grasp_poses
 
