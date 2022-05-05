@@ -69,8 +69,11 @@ def inference(global_config, checkpoint_dir, input_paths, K=None, local_regions=
                                                                                     skip_border_objects=skip_border_objects, z_range=z_range)
 
         print('Generating Grasps...')
+        
         pred_grasps_cam, scores, contact_pts, _ = grasp_estimator.predict_scene_grasps(sess, pc_full, pc_segments=pc_segments, 
                                                                                           local_regions=local_regions, filter_grasps=filter_grasps, forward_passes=forward_passes)  
+
+            
 
         # Save results
         np.savez('results/predictions_{}'.format(os.path.basename(p.replace('png','npz').replace('npy','npz'))), 

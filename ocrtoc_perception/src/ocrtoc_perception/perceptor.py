@@ -94,8 +94,11 @@ def process_pcds(pcds, use_camera, reconstruction_config):
         income_pcd = income_pcd.transform(reg_p2p.transformation)
         trans[i] = reg_p2p.transformation
         pcd = o3dp.merge_pcds([pcd, income_pcd])
-        cd = pcd.voxel_down_sample(voxel_size)
+        pcd = pcd.voxel_down_sample(voxel_size)
         pcd.estimate_normals()
+    
+    # pcd = pcd.uniform_down_sample(every_k_points=5)
+    
     return trans, pcd
 
 class Perceptor():
@@ -1056,12 +1059,17 @@ class Perceptor():
         full_pcd, color_images, camera_poses = self.capture_data()
         
         gg, t = self.compute_grasp_poses3(full_pcd)
-        i=0
-        while i<3:
-            print("GRASPS GENERATED !!!!!!!!!!!!")
+        
+        if self.debug_pointcloud:
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+            frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+            o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
+        # i=0
+        # while i<3:
+        #     print("GRASPS GENERATED !!!!!!!!!!!!")
             
-            print(" ")
-            i=i+1
+        #     print(" ")
+        #     i=i+1
         
         #Compute 6d pose
         print("Object list in perceptor: {}".format(object_list))
@@ -1081,26 +1089,23 @@ class Perceptor():
         
         # Compute Grasping Poses (Many Poses in a Scene)
         
-        if self.debug_pointcloud:
-            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-            frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-            o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
+        
 
         # Assign the Best Grasp Pose on Each Object
-        i=0
-        while i<3:
-            print("ASSIGNING GRASP POSE !!!!!!!!!!!!")
+        # i=0
+        # while i<3:
+        #     print("ASSIGNING GRASP POSE !!!!!!!!!!!!")
             
-            print(" ")
-            i=i+1
+        #     print(" ")
+        #     i=i+1
         grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
-        i=0
-        while i<3:
-            print("ASSIGNED GRASP POSE !!!!!!!!!!!!")
+        # i=0
+        # while i<3:
+        #     print("ASSIGNED GRASP POSE !!!!!!!!!!!!")
             
-            # print(" ")
-            # i=i+1
-            # print("grasps ready")
+        #     # print(" ")
+        #     i=i+1
+        print("grasps ready")
                     
         return object_poses, grasp_poses
 
