@@ -1416,7 +1416,7 @@ class TaskPlanner(object):
                    
         count = 0
         label_count = 1
-        while len(self.left_object_labels) > 0 and count <= 5:
+        while len(self.left_object_labels) > 0 and count <= 5: #5
 
             self.set_temp_status_not_done()
 

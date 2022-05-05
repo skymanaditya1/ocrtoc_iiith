@@ -100,7 +100,7 @@ def process_pcds(pcds, use_camera, reconstruction_config):
         income_pcd = income_pcd.transform(reg_p2p.transformation)
         trans[i] = reg_p2p.transformation
         pcd = o3dp.merge_pcds([pcd, income_pcd])
-        cd = pcd.voxel_down_sample(voxel_size)
+        pcd = pcd.voxel_down_sample(voxel_size)
         pcd.estimate_normals()
     return trans, pcd
 
@@ -1103,6 +1103,13 @@ class Perceptor():
         # Capture Data
         full_pcd, color_images, camera_poses = self.capture_data()
         
+        gg, t = self.compute_grasp_poses3(full_pcd)
+        if self.debug_pointcloud:
+            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+            frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
+            o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
+
+
         #Compute 6d pose
         print("Object list in perceptor: {}".format(object_list))
         object_poses = self.compute_6d_pose(
@@ -1120,12 +1127,7 @@ class Perceptor():
         # full_pcd = self.icp_finer(full_pcd, object_poses )
         
         # Compute Grasping Poses (Many Poses in a Scene)
-        gg, t = self.compute_grasp_poses3(full_pcd)
-        if self.debug_pointcloud:
-            frame = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-            frame_grasp_pose = o3d.geometry.TriangleMesh.create_coordinate_frame(0.1)
-            o3d.visualization.draw_geometries([frame, full_pcd, *gg.to_open3d_geometry_list(), frame_grasp_pose])
-
+        
         # Assign the Best Grasp Pose on Each Object
         grasp_poses, remain_gg = self.assign_grasp_pose3(gg, object_poses)
         
