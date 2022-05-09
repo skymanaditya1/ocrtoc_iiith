@@ -19,6 +19,7 @@ import rospy
 from sensor_msgs.msg import JointState
 import time
 
+from scene_classification import scene_process
 
 sys.path.append(os.path.join(os.path.dirname(__file__), 'pddlstream'))
 from pddlstream.algorithms.focused import solve_focused
@@ -41,7 +42,7 @@ class TaskPlanner(object):
     with the class called MotionPlanner.
     """
 
-    def __init__(self, blocks=[], goal_cartesian_poses=[]):
+    def __init__(self, blocks=[], goal_cartesian_poses=[], scene_id = None):
         """Inits TaskPlanner with object names and corresponding target poses.
 
         :param blocks: A list of object names
@@ -49,6 +50,9 @@ class TaskPlanner(object):
         """
         print("start construct task planner")
         # load parameters
+        
+        self.scene_id = scene_id
+        
         rospack = rospkg.RosPack()
         task_config_path = os.path.join(rospack.get_path('ocrtoc_planning'), 'config/task_planner_parameter.yaml')
         with open(task_config_path, "r") as f:
@@ -93,8 +97,8 @@ class TaskPlanner(object):
 
         self._goal_cartesian_pose_dic = {}
         for object_type in _goal_cartesian_pose_dic_temp:
-            if 'clear_box' in object_type:
-                continue
+            # if 'clear_box' in object_type:
+            #     continue
             for i, pose_of_object in enumerate(_goal_cartesian_pose_dic_temp[object_type]):
                 self._goal_cartesian_pose_dic['{}_v{}'.format(object_type, i)] = pose_of_object
         self._blocks = list(self._goal_cartesian_pose_dic.keys())
@@ -435,6 +439,9 @@ class TaskPlanner(object):
             self.clear_box_flag = True
             print("Clear box found!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!")
         
+        ### Scene recognition
+        scene_identified = False
+        
         while len(left_object_dic) != 0:
             # get left objects information
             rospy.loginfo('Try to get information of left objects from perception node')
@@ -459,6 +466,17 @@ class TaskPlanner(object):
                 else:
                     continue
 
+            if not scene_identified:
+                process_scene = scene_process(self._available_cartesian_pose_dic, self._goal_cartesian_pose_dic)
+                print('Given scene should be ' + '' if process_scene else 'not' + ' processed...' )
+                
+                #test stuff
+                log_file_path = '/root/ocrtoc_ws/src/process_result.txt'
+                with open(log_file_path, 'a+') as result_file:
+                    result_file.write("Task name: {} | Processed: {}\n".format(self.scene_id, process_scene))
+
+                break
+            
             # compare goal objects and currently available objects
             self._target_cartesian_pose_dic.clear()
             self._target_block_pose_dic.clear()

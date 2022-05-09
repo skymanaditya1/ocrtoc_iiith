@@ -26,9 +26,9 @@ class SolutionServer(object):
         # extract pose information
         blocks = goal.object_list
         goal_cartesian_poses = goal.pose_list
-
+        scene_id = goal.scene_id
         # start task planning
-        self.planner = TaskPlanner(blocks, goal_cartesian_poses)
+        self.planner = TaskPlanner(blocks, goal_cartesian_poses, scene_id)
         self.planner.cycle_plan_all()
         rospy.loginfo("planning finished")
 

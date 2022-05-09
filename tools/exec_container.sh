@@ -1,1 +1,1 @@
-docker exec -it sub30_6dof bash
+docker exec -it ocrtoc bash
